@@ -47,7 +47,13 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 // PerformUpdate downloads and applies the update
 // POST /api/v1/admin/system/update
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
-	if err := h.updateSvc.PerformUpdate(c.Request.Context()); err != nil {
+	var err error
+	if h.updateSvc.IsSourceBuild() {
+		err = h.updateSvc.PerformSourceUpdate(c.Request.Context())
+	} else {
+		err = h.updateSvc.PerformUpdate(c.Request.Context())
+	}
+	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

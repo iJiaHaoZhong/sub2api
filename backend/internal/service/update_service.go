@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
+	"os/exec"
 	"fmt"
 	"io"
 	"net/url"
@@ -270,6 +272,38 @@ func (s *UpdateService) Rollback() error {
 		return fmt.Errorf("rollback failed: %w", err)
 	}
 
+	return nil
+}
+
+// IsSourceBuild returns true if this is a source build
+func (s *UpdateService) IsSourceBuild() bool {
+	return s.buildType == "source" || s.buildType == ""
+}
+
+// PerformSourceUpdate runs the source update via systemd oneshot service.
+// This triggers sub2api-update.service which runs as admin user and handles:
+// git fetch, merge, build, and binary replacement.
+func (s *UpdateService) PerformSourceUpdate(ctx context.Context) error {
+	info, err := s.CheckUpdate(ctx, true)
+	if err != nil {
+		return err
+	}
+	if !info.HasUpdate {
+		return fmt.Errorf("no update available")
+	}
+
+	log.Println("[Update] Starting source update via systemd...")
+
+	cmd := exec.CommandContext(ctx, "sudo", "systemctl", "start", "sub2api-update")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Try to get journal logs for details
+		journalCmd := exec.Command("sudo", "journalctl", "-u", "sub2api-update", "-n", "50", "--no-pager")
+		journalOutput, _ := journalCmd.CombinedOutput()
+		return fmt.Errorf("source update failed: %v\nOutput: %s\nJournal: %s", err, string(output), string(journalOutput))
+	}
+
+	log.Println("[Update] Source update completed successfully")
 	return nil
 }
 
