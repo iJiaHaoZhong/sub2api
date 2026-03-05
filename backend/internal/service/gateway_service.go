@@ -6094,33 +6094,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	clientDisconnected := false // 客户端断开标志，断开后继续读取上游以获取完整usage
 
 	pendingEventLines := make([]string, 0, 4)
-	var toolInputBuffers map[int]string
 	if mimicClaudeCode {
-		toolInputBuffers = make(map[int]string)
 	}
 
-	transformToolInputJSON := func(raw string) string {
-		if !mimicClaudeCode {
-			return raw
-		}
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			return raw
-		}
-
-		var parsed any
-		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-			return replaceToolNamesInText(raw, toolNameMap)
-		}
-
-		rewritten, changed := rewriteParamKeysInValue(parsed, toolNameMap)
-		if changed {
-			if bytes, err := json.Marshal(rewritten); err == nil {
-				return string(bytes)
-			}
-		}
-		return raw
-	}
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
 		if len(lines) == 0 {
@@ -6167,7 +6143,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if eventName != "" {
 				block = "event: " + eventName + "\n"
 			}
-			block += "data: " + dataLine + "\n\n"
+			block += "data: " + replaced + "\n\n"
 			return []string{block}, dataLine, nil, nil
 		}
 
@@ -6237,7 +6213,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if eventName != "" {
 				block = "event: " + eventName + "\n"
 			}
-			block += "data: " + dataLine + "\n\n"
+			block += "data: " + replaced + "\n\n"
 			return []string{block}, dataLine, usagePatch, nil
 		}
 
