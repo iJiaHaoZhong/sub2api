@@ -180,7 +180,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	if account.Platform == PlatformAntigravity {
-		return s.testAntigravityAccountConnection(c, account, modelID)
+		return s.routeAntigravityTest(c, account, modelID)
 	}
 
 	if account.Platform == PlatformSora {
@@ -406,8 +406,27 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if isOAuth && s.accountRepo != nil {
+		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
+			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+			mergeAccountExtra(account, updates)
+		}
+		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
+			if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil {
+				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
+				account.RateLimitResetAt = resetAt
+			}
+		}
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		if isOAuth && s.accountRepo != nil {
+			if resetAt := (&RateLimitService{}).calculateOpenAI429ResetTime(resp.Header); resetAt != nil {
+				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
+				account.RateLimitResetAt = resetAt
+			}
+		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
@@ -1175,6 +1194,18 @@ func (s *AccountTestService) logSoraCloudflareChallenge(account *Account, proxyU
 
 func truncateSoraErrorBody(body []byte, max int) string {
 	return soraerror.TruncateBody(body, max)
+}
+
+// routeAntigravityTest 路由 Antigravity 账号的测试请求。
+// APIKey 类型走原生协议（与 gateway_handler 路由一致），OAuth/Upstream 走 CRS 中转。
+func (s *AccountTestService) routeAntigravityTest(c *gin.Context, account *Account, modelID string) error {
+	if account.Type == AccountTypeAPIKey {
+		if strings.HasPrefix(modelID, "gemini-") {
+			return s.testGeminiAccountConnection(c, account, modelID)
+		}
+		return s.testClaudeAccountConnection(c, account, modelID)
+	}
+	return s.testAntigravityAccountConnection(c, account, modelID)
 }
 
 // testAntigravityAccountConnection tests an Antigravity account's connection
