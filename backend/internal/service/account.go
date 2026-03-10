@@ -119,6 +119,10 @@ func (a *Account) IsSchedulable() bool {
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		return false
 	}
+	// 当 Anthropic 官方 rejected 窗口且窗口未过期时，不可调度
+	if a.SessionWindowStatus == "rejected" && a.SessionWindowEnd != nil && now.Before(*a.SessionWindowEnd) {
+		return false
+	}
 	return true
 }
 
