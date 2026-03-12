@@ -133,6 +133,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatCountdownWithSuffix, formatTime } from '@/utils/format'
+import { serverNow } from '@/utils/serverTime'
 
 const { t } = useI18n()
 
@@ -147,7 +148,7 @@ const emit = defineEmits<{
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {
   if (!props.account.rate_limit_reset_at) return false
-  return new Date(props.account.rate_limit_reset_at) > new Date()
+  return new Date(props.account.rate_limit_reset_at) > serverNow()
 })
 
 
@@ -157,7 +158,7 @@ const activeModelRateLimits = computed(() => {
     | Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     | undefined
   if (!modelLimits) return []
-  const now = new Date()
+  const now = serverNow()
   return Object.entries(modelLimits)
     .filter(([, info]) => new Date(info.rate_limit_reset_at) > now)
     .map(([model, info]) => ({ model, reset_at: info.rate_limit_reset_at }))
@@ -200,7 +201,7 @@ const formatScopeName = (scope: string): string => {
 
 const formatModelResetTime = (resetAt: string): string => {
   const date = new Date(resetAt)
-  const now = new Date()
+  const now = serverNow()
   const diffMs = date.getTime() - now.getTime()
   if (diffMs <= 0) return ''
   const totalSecs = Math.floor(diffMs / 1000)
@@ -215,13 +216,13 @@ const formatModelResetTime = (resetAt: string): string => {
 // Computed: is overloaded (529)
 const isOverloaded = computed(() => {
   if (!props.account.overload_until) return false
-  return new Date(props.account.overload_until) > new Date()
+  return new Date(props.account.overload_until) > serverNow()
 })
 
 // Computed: is temp unschedulable
 const isTempUnschedulable = computed(() => {
   if (!props.account.temp_unschedulable_until) return false
-  return new Date(props.account.temp_unschedulable_until) > new Date()
+  return new Date(props.account.temp_unschedulable_until) > serverNow()
 })
 
 // Computed: has error status

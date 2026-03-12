@@ -5,6 +5,7 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types'
+import { updateServerTimeOffset } from "@/utils/serverTime"
 import { getLocale } from '@/i18n'
 
 // ==================== Axios Instance Configuration ====================
@@ -84,6 +85,9 @@ apiClient.interceptors.request.use(
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
+    // Sync server time offset from Date header
+    updateServerTimeOffset(response.headers["date"] || null)
+
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
     if (apiResponse && typeof apiResponse === 'object' && 'code' in apiResponse) {

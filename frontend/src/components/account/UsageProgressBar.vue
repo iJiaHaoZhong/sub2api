@@ -33,6 +33,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { WindowStats } from '@/types'
+import { serverNow } from '@/utils/serverTime'
 
 const props = defineProps<{
   label: string
@@ -90,7 +91,7 @@ const displayPercent = computed(() => {
 const formatResetTime = computed(() => {
   if (!props.resetsAt) return '-'
   const date = new Date(props.resetsAt)
-  const now = new Date()
+  const now = serverNow()
   const diffMs = date.getTime() - now.getTime()
 
   if (diffMs <= 0) return '现在'

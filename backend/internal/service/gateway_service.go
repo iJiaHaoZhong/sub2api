@@ -4366,7 +4366,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
-			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
+			// proxy/connection error → failover to another account
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -4374,17 +4374,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				AccountID:          account.ID,
 				AccountName:        account.Name,
 				UpstreamStatusCode: 0,
-				Kind:               "request_error",
+				Kind:               "failover",
 				Message:            safeErr,
 			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			return nil, &UpstreamFailoverError{StatusCode: 502}
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
@@ -4814,6 +4807,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
+			// proxy/connection error (passthrough) → failover to another account
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -4822,17 +4816,10 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 				AccountName:        account.Name,
 				UpstreamStatusCode: 0,
 				Passthrough:        true,
-				Kind:               "request_error",
+				Kind:               "failover",
 				Message:            safeErr,
 			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			return nil, &UpstreamFailoverError{StatusCode: 502}
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）

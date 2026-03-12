@@ -53,25 +53,26 @@ import { computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
+import { serverNow } from '@/utils/serverTime'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
 const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'reauth', 'refresh-token', 'recover-state', 'reset-quota'])
 const { t } = useI18n()
 const isRateLimited = computed(() => {
-  if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > new Date()) {
+  if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > serverNow()) {
     return true
   }
   const modelLimits = (props.account?.extra as Record<string, unknown> | undefined)?.model_rate_limits as
     | Record<string, { rate_limit_reset_at: string }>
     | undefined
   if (modelLimits) {
-    const now = new Date()
+    const now = serverNow()
     return Object.values(modelLimits).some(info => new Date(info.rate_limit_reset_at) > now)
   }
   return false
 })
-const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
-const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
+const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > serverNow())
+const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > serverNow())
 const hasRecoverableState = computed(() => {
   return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
 })

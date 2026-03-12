@@ -31,6 +31,7 @@
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account, GeminiCredentials } from '@/types'
+import { serverNow } from '@/utils/serverTime'
 
 const props = defineProps<{
   account: Account
@@ -38,7 +39,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const now = ref(new Date())
+const now = ref(serverNow())
 let timer: ReturnType<typeof setInterval> | null = null
 
 // 是否为 Code Assist OAuth
@@ -178,7 +179,7 @@ watch(
     if (limited && !timer) {
       // 进入限流状态，启动定时器
       timer = setInterval(() => {
-        now.value = new Date()
+        now.value = serverNow()
       }, 1000)
     } else if (!limited && timer) {
       // 解除限流，停止定时器
