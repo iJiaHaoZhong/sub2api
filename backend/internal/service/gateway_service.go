@@ -5920,9 +5920,20 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 
 
-	// [powerBox patch] Force Claude Code UA for API-key accounts to avoid upstream blocking
+	// [powerBox patch v2] Full Claude Code mimicry for API-key accounts on relay upstreams.
+	// Forces CC headers (x-stainless-*, x-app, user-agent) and CC anthropic-beta tokens
+	// so the request is indistinguishable from real Claude Code OAuth traffic at the
+	// upstream relay (e.g. CPA -> antigravity), avoiding "Extra usage" classification.
 	if tokenType != "oauth" {
-		req.Header.Set("User-Agent", claude.DefaultHeaders["User-Agent"])
+		applyClaudeCodeMimicHeaders(req, reqStream)
+		incomingBeta := req.Header.Get("anthropic-beta")
+		var requiredBetas []string
+		if strings.Contains(strings.ToLower(modelID), "haiku") {
+			requiredBetas = []string{claude.BetaOAuth, claude.BetaInterleavedThinking}
+		} else {
+			requiredBetas = []string{claude.BetaClaudeCode, claude.BetaOAuth, claude.BetaInterleavedThinking}
+		}
+		req.Header.Set("anthropic-beta", mergeAnthropicBetaDropping(requiredBetas, incomingBeta, effectiveDropSet))
 	}
 	// Always capture a compact fingerprint line for later error diagnostics.
 	// We only print it when needed (or when the explicit debug flag is enabled).
