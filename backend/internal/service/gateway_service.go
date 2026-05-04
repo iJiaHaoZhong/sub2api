@@ -5919,6 +5919,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
+
+	// [powerBox patch] Force Claude Code UA for API-key accounts to avoid upstream blocking
+	if tokenType != "oauth" {
+		req.Header.Set("User-Agent", claude.DefaultHeaders["User-Agent"])
+	}
 	// Always capture a compact fingerprint line for later error diagnostics.
 	// We only print it when needed (or when the explicit debug flag is enabled).
 	if c != nil && tokenType == "oauth" {
