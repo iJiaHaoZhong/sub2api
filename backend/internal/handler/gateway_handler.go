@@ -193,6 +193,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	// [powerBox patch] 前置模型名验证：非 claude- 前缀的模型名直接拒绝，避免无效请求浪费上游资源
+	if apiKey.Group != nil && apiKey.Group.Platform == "anthropic" {
+		if !strings.HasPrefix(strings.ToLower(reqModel), "claude-") {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error",
+				"Model '"+reqModel+"' is not supported on this platform. Only Claude models (claude-*) are accepted.")
+			return
+		}
+	}
+
 	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
@@ -1558,6 +1567,15 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	if parsedReq.Model == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
+	}
+
+	// [powerBox patch] 前置模型名验证
+	if apiKey.Group != nil && apiKey.Group.Platform == "anthropic" {
+		if !strings.HasPrefix(strings.ToLower(parsedReq.Model), "claude-") {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error",
+				"Model '"+parsedReq.Model+"' is not supported on this platform. Only Claude models (claude-*) are accepted.")
+			return
+		}
 	}
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)

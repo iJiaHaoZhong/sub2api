@@ -523,7 +523,6 @@ func (e *UpstreamFailoverError) Error() string {
 	return fmt.Sprintf("upstream error: %d (failover)", e.StatusCode)
 }
 
-
 // TempUnscheduleRetryableError 对 RetryableOnSameAccount 类型的 failover 错误触发临时封禁。
 // 由 handler 层在同账号重试全部用尽、切换账号时调用。
 func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accountID int64, failoverErr *UpstreamFailoverError) {
@@ -910,71 +909,6 @@ type claudeOAuthNormalizeOptions struct {
 	stripSystemCacheControl bool
 }
 
-func stripToolPrefix(value string) string {
-	if value == "" {
-		return value
-	}
-	return toolPrefixRe.ReplaceAllString(value, "")
-}
-
-func toSnakeCase(value string) string {
-	if value == "" {
-		return value
-	}
-	output := toolNameCamelRe.ReplaceAllString(value, "$1_$2")
-	output = toolNameBoundaryRe.ReplaceAllString(output, "_")
-	output = strings.Trim(output, "_")
-	return strings.ToLower(output)
-}
-
-func normalizeToolNameForClaude(name string, cache map[string]string) string {
-	if name == "" {
-		return name
-	}
-	stripped := stripToolPrefix(name)
-	// 只对已知的工具名进行映射，未知工具名保持原样
-	// 避免破坏 Anthropic 特殊工具（如 text_editor_20250728）
-	mapped, ok := claudeToolNameOverrides[strings.ToLower(stripped)]
-	if !ok {
-		return stripped
-	}
-	if cache != nil && mapped != stripped {
-		cache[mapped] = stripped
-	}
-	return mapped
-}
-
-func normalizeToolNameForOpenCode(name string, cache map[string]string) string {
-	if name == "" {
-		return name
-	}
-	stripped := stripToolPrefix(name)
-	// 优先从请求时建立的映射中查找
-	if cache != nil {
-		if mapped, ok := cache[stripped]; ok {
-			return mapped
-		}
-	}
-	// 已知工具名的硬编码映射
-	if mapped, ok := openCodeToolOverrides[stripped]; ok {
-		return mapped
-	}
-	// 未知工具名保持原样，避免破坏 Anthropic 特殊工具
-	return stripped
-}
-
-func normalizeParamNameForOpenCode(name string, cache map[string]string) string {
-	if name == "" {
-		return name
-	}
-	if cache != nil {
-		if mapped, ok := cache[name]; ok {
-			return mapped
-		}
-	}
-	return name
-}
-
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
 // We intentionally avoid broad keyword replacement in system prompts to prevent
 // accidentally changing user-provided instructions.
@@ -1138,9 +1072,9 @@ func ensureClaudeOAuthMetadataUserID(body []byte, userID string) ([]byte, bool) 
 	return setJSONRawBytes(body, "metadata", raw)
 }
 
-func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAuthNormalizeOptions) ([]byte, string, map[string]string) {
+func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAuthNormalizeOptions) ([]byte, string) {
 	if len(body) == 0 {
-		return body, modelID, nil
+		return body, modelID
 	}
 
 	out := body
@@ -1224,8 +1158,8 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	if !modified && !messagesModified {
-		return body, modelID, toolNameMap
+	if !modified {
+		return body, modelID
 	}
 
 	return out, modelID
@@ -4459,7 +4393,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	reqModel := parsed.Model
 	reqStream := parsed.Stream
 	originalModel := reqModel
-	var toolNameMap map[string]string
 
 	// === DEBUG: 打印客户端原始请求（headers + body 摘要）===
 	if c != nil {
@@ -4610,7 +4543,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
-			// proxy/connection error → failover to another account
+			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -4622,7 +4555,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: 502}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "upstream_error",
+					"message": "Upstream request failed",
+				},
+			})
+			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
@@ -4989,7 +4929,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if reqStream {
-		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, toolNameMap, shouldMimicClaudeCode)
+		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, shouldMimicClaudeCode)
 		if err != nil {
 			if err.Error() == "have error in stream" {
 				return nil, &UpstreamFailoverError{
@@ -5002,7 +4942,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
 	} else {
-		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel, toolNameMap, shouldMimicClaudeCode)
+		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel)
 		if err != nil {
 			return nil, err
 		}
@@ -5090,7 +5030,6 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
-			// proxy/connection error (passthrough) → failover to another account
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -5100,10 +5039,17 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				UpstreamStatusCode: 0,
 				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
 				Passthrough:        true,
-				Kind:               "failover",
+				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: 502}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "upstream_error",
+					"message": "Upstream request failed",
+				},
+			})
+			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
@@ -6366,7 +6312,8 @@ func requestNeedsBetaFeatures(body []byte) bool {
 	if tools.Exists() && tools.IsArray() && len(tools.Array()) > 0 {
 		return true
 	}
-	if strings.EqualFold(gjson.GetBytes(body, "thinking.type").String(), "enabled") {
+	thinkingType := gjson.GetBytes(body, "thinking.type").String()
+	if strings.EqualFold(thinkingType, "enabled") || strings.EqualFold(thinkingType, "adaptive") {
 		return true
 	}
 	return false
@@ -7263,7 +7210,7 @@ type streamingResult struct {
 	clientDisconnect bool // 客户端是否在流式传输过程中断开
 }
 
-func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, toolNameMap map[string]string, mimicClaudeCode bool) (*streamingResult, error) {
+func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
@@ -7395,9 +7342,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	sawTerminalEvent := false
 
 	pendingEventLines := make([]string, 0, 4)
-	if mimicClaudeCode {
-	}
-
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
 		if len(lines) == 0 {
@@ -7437,15 +7381,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		var event map[string]any
 		if err := json.Unmarshal([]byte(dataLine), &event); err != nil {
-			replaced := dataLine
-			if mimicClaudeCode {
-				replaced = replaceToolNamesInText(dataLine, toolNameMap)
-			}
+			// JSON 解析失败，直接透传原始数据
 			block := ""
 			if eventName != "" {
 				block = "event: " + eventName + "\n"
 			}
-			block += "data: " + replaced + "\n\n"
+			block += "data: " + dataLine + "\n\n"
 			return []string{block}, dataLine, nil, nil
 		}
 
@@ -7510,15 +7451,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		newData, err := json.Marshal(event)
 		if err != nil {
-			replaced := dataLine
-			if mimicClaudeCode {
-				replaced = replaceToolNamesInText(dataLine, toolNameMap)
-			}
+			// 序列化失败，直接透传原始数据
 			block := ""
 			if eventName != "" {
 				block = "event: " + eventName + "\n"
 			}
-			block += "data: " + replaced + "\n\n"
+			block += "data: " + dataLine + "\n\n"
 			return []string{block}, dataLine, usagePatch, nil
 		}
 
@@ -7660,126 +7598,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 	}
 
-}
-
-func rewriteParamKeysInValue(value any, cache map[string]string) (any, bool) {
-	switch v := value.(type) {
-	case map[string]any:
-		changed := false
-		rewritten := make(map[string]any, len(v))
-		for key, item := range v {
-			newKey := normalizeParamNameForOpenCode(key, cache)
-			newItem, childChanged := rewriteParamKeysInValue(item, cache)
-			if childChanged {
-				changed = true
-			}
-			if newKey != key {
-				changed = true
-			}
-			rewritten[newKey] = newItem
-		}
-		if !changed {
-			return value, false
-		}
-		return rewritten, true
-	case []any:
-		changed := false
-		rewritten := make([]any, len(v))
-		for idx, item := range v {
-			newItem, childChanged := rewriteParamKeysInValue(item, cache)
-			if childChanged {
-				changed = true
-			}
-			rewritten[idx] = newItem
-		}
-		if !changed {
-			return value, false
-		}
-		return rewritten, true
-	default:
-		return value, false
-	}
-}
-
-func rewriteToolNamesInValue(value any, toolNameMap map[string]string) bool {
-	switch v := value.(type) {
-	case map[string]any:
-		changed := false
-		if blockType, _ := v["type"].(string); blockType == "tool_use" {
-			if name, ok := v["name"].(string); ok {
-				mapped := normalizeToolNameForOpenCode(name, toolNameMap)
-				if mapped != name {
-					v["name"] = mapped
-					changed = true
-				}
-			}
-			if input, ok := v["input"].(map[string]any); ok {
-				rewrittenInput, inputChanged := rewriteParamKeysInValue(input, toolNameMap)
-				if inputChanged {
-					if m, ok := rewrittenInput.(map[string]any); ok {
-						v["input"] = m
-						changed = true
-					}
-				}
-			}
-		}
-		for _, item := range v {
-			if rewriteToolNamesInValue(item, toolNameMap) {
-				changed = true
-			}
-		}
-		return changed
-	case []any:
-		changed := false
-		for _, item := range v {
-			if rewriteToolNamesInValue(item, toolNameMap) {
-				changed = true
-			}
-		}
-		return changed
-	default:
-		return false
-	}
-}
-
-func replaceToolNamesInText(text string, toolNameMap map[string]string) string {
-	if text == "" {
-		return text
-	}
-	output := toolNameFieldRe.ReplaceAllStringFunc(text, func(match string) string {
-		submatches := toolNameFieldRe.FindStringSubmatch(match)
-		if len(submatches) < 2 {
-			return match
-		}
-		name := submatches[1]
-		mapped := normalizeToolNameForOpenCode(name, toolNameMap)
-		if mapped == name {
-			return match
-		}
-		return strings.Replace(match, name, mapped, 1)
-	})
-	output = modelFieldRe.ReplaceAllStringFunc(output, func(match string) string {
-		submatches := modelFieldRe.FindStringSubmatch(match)
-		if len(submatches) < 2 {
-			return match
-		}
-		model := submatches[1]
-		mapped := claude.DenormalizeModelID(model)
-		if mapped == model {
-			return match
-		}
-		return strings.Replace(match, model, mapped, 1)
-	})
-
-	for mapped, original := range toolNameMap {
-		if mapped == "" || original == "" || mapped == original {
-			continue
-		}
-		output = strings.ReplaceAll(output, "\""+mapped+"\":", "\""+original+"\":")
-		output = strings.ReplaceAll(output, "\\\""+mapped+"\\\":", "\\\""+original+"\\\":")
-	}
-
-	return output
 }
 
 func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
@@ -8068,9 +7886,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	if originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
-	if mimicClaudeCode {
-		body = s.replaceToolNamesInResponseBody(body, toolNameMap)
-	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -8117,28 +7932,6 @@ func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID,
 		)
 	}
 	return resolver.Resolve(ctx, userID, groupID, groupDefaultMultiplier)
-}
-
-func (s *GatewayService) replaceToolNamesInResponseBody(body []byte, toolNameMap map[string]string) []byte {
-	if len(body) == 0 {
-		return body
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(body, &resp); err != nil {
-		replaced := replaceToolNamesInText(string(body), toolNameMap)
-		if replaced == string(body) {
-			return body
-		}
-		return []byte(replaced)
-	}
-	if !rewriteToolNamesInValue(resp, toolNameMap) {
-		return body
-	}
-	newBody, err := json.Marshal(resp)
-	if err != nil {
-		return body
-	}
-	return newBody
 }
 
 // RecordUsageInput 记录使用量的输入参数
