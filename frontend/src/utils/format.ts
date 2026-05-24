@@ -193,7 +193,9 @@ export function formatReasoningEffort(effort: string | null | undefined): string
       return 'High'
     case 'xhigh':
     case 'extrahigh':
-      return 'Xhigh'
+      return 'XHigh'
+    case 'max':
+      return 'Max'
     case 'none':
     case 'minimal':
       return '-'
@@ -245,6 +247,26 @@ export function formatTokensK(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
   return tokens.toString()
+}
+
+/**
+ * 格式化大数字（K/M/B，保留 1 位小数）
+ * @param num 数字
+ * @param options allowBillions=false 时最高只显示到 M
+ */
+export function formatCompactNumber(
+  num: number | null | undefined,
+  options?: { allowBillions?: boolean }
+): string {
+  if (num === null || num === undefined) return '0'
+
+  const abs = Math.abs(num)
+  const allowBillions = options?.allowBillions !== false
+
+  if (allowBillions && abs >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1)}B`
+  if (abs >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `${(num / 1_000).toFixed(1)}K`
+  return num.toString()
 }
 
 /**

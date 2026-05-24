@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"runtime"
 	"runtime/debug"
@@ -22,10 +23,36 @@ import (
 )
 
 const (
-	opsModelKey       = "ops_model"
-	opsStreamKey      = "ops_stream"
-	opsRequestBodyKey = "ops_request_body"
-	opsAccountIDKey   = "ops_account_id"
+	opsModelKey                  = "ops_model"
+	opsStreamKey                 = "ops_stream"
+	opsAccountIDKey              = "ops_account_id"
+	opsRoutingCapacityLimitedKey = "ops_routing_capacity_limited"
+
+	opsUpstreamModelKey = "ops_upstream_model"
+	opsRequestTypeKey   = "ops_request_type"
+
+	// 错误过滤匹配常量 — shouldSkipOpsErrorLog 和错误分类共用
+	opsErrContextCanceled            = "context canceled"
+	opsErrNoAvailableAccounts        = "no available accounts"
+	opsErrInvalidAPIKey              = "invalid_api_key"
+	opsErrAPIKeyRequired             = "api_key_required"
+	opsErrInsufficientBalance        = "insufficient balance"
+	opsErrInsufficientAccountBalance = "insufficient account balance"
+	opsErrInsufficientQuota          = "insufficient_quota"
+
+	// 上游错误码常量 — 错误分类 (normalizeOpsErrorType / classifyOpsPhase / classifyOpsIsBusinessLimited)
+	opsCodeInsufficientBalance   = "INSUFFICIENT_BALANCE"
+	opsCodeUsageLimitExceeded    = "USAGE_LIMIT_EXCEEDED"
+	opsCodeSubscriptionNotFound  = "SUBSCRIPTION_NOT_FOUND"
+	opsCodeSubscriptionInvalid   = "SUBSCRIPTION_INVALID"
+	opsCodeUserInactive          = "USER_INACTIVE"
+	opsCodeInvalidAPIKey         = "INVALID_API_KEY"
+	opsCodeAPIKeyRequired        = "API_KEY_REQUIRED"
+	opsCodeAPIKeyExpired         = "API_KEY_EXPIRED"
+	opsCodeAPIKeyDisabled        = "API_KEY_DISABLED"
+	opsCodeUserNotFound          = "USER_NOT_FOUND"
+	opsCodeAPIKeyQuotaExhausted  = "API_KEY_QUOTA_EXHAUSTED"
+	opsCodeAPIKeyQueryDeprecated = "api_key_in_query_deprecated"
 )
 
 const (
@@ -313,36 +340,29 @@ func opsErrorLogConfig() (workerCount int, queueSize int) {
 	return workerCount, queueSize
 }
 
-func setOpsRequestContext(c *gin.Context, model string, stream bool, requestBody []byte) {
+func setOpsRequestContext(c *gin.Context, model string, stream bool) {
 	if c == nil {
 		return
 	}
 	model = strings.TrimSpace(model)
 	c.Set(opsModelKey, model)
 	c.Set(opsStreamKey, stream)
-	if len(requestBody) > 0 {
-		c.Set(opsRequestBodyKey, requestBody)
-	}
 	if c.Request != nil && model != "" {
 		ctx := context.WithValue(c.Request.Context(), ctxkey.Model, model)
 		c.Request = c.Request.WithContext(ctx)
 	}
 }
 
-func attachOpsRequestBodyToEntry(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
-	if c == nil || entry == nil {
+// setOpsEndpointContext stores upstream model and request type for ops error logging.
+// Called by handlers after model mapping and request type determination.
+func setOpsEndpointContext(c *gin.Context, upstreamModel string, requestType int16) {
+	if c == nil {
 		return
 	}
-	v, ok := c.Get(opsRequestBodyKey)
-	if !ok {
-		return
+	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+		c.Set(opsUpstreamModelKey, upstreamModel)
 	}
-	raw, ok := v.([]byte)
-	if !ok || len(raw) == 0 {
-		return
-	}
-	entry.RequestBodyJSON, entry.RequestBodyTruncated, entry.RequestBodyBytes = service.PrepareOpsRequestBodyForQueue(raw)
-	opsErrorLogSanitized.Add(1)
+	c.Set(opsRequestTypeKey, requestType)
 }
 
 func setOpsSelectedAccount(c *gin.Context, accountID int64, platform ...string) {
@@ -360,6 +380,42 @@ func setOpsSelectedAccount(c *gin.Context, accountID int64, platform ...string) 
 		}
 		c.Request = c.Request.WithContext(ctx)
 	}
+}
+
+func markOpsRoutingCapacityLimited(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(opsRoutingCapacityLimitedKey, true)
+}
+
+func markOpsRoutingCapacityLimitedIfNoAvailable(c *gin.Context, err error) {
+	if !isOpsNoAvailableAccountError(err) {
+		return
+	}
+	markOpsRoutingCapacityLimited(c)
+}
+
+func isOpsRoutingCapacityLimited(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(opsRoutingCapacityLimitedKey)
+	if !ok {
+		return false
+	}
+	marked, _ := v.(bool)
+	return marked
+}
+
+func isOpsNoAvailableAccountError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, service.ErrNoAvailableAccounts) || errors.Is(err, service.ErrNoAvailableCompactAccounts) {
+		return true
+	}
+	return isOpsNoAvailableAccountMessage(err.Error())
 }
 
 type opsCaptureWriter struct {
@@ -612,12 +668,35 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 					}
 					return ""
 				}(),
-				Stream:    stream,
+				Stream:           stream,
+				InboundEndpoint:  GetInboundEndpoint(c),
+				UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
+				RequestedModel:   modelName,
+				UpstreamModel: func() string {
+					if v, ok := c.Get(opsUpstreamModelKey); ok {
+						if s, ok := v.(string); ok {
+							return strings.TrimSpace(s)
+						}
+					}
+					return ""
+				}(),
+				RequestType: func() *int16 {
+					if v, ok := c.Get(opsRequestTypeKey); ok {
+						switch t := v.(type) {
+						case int16:
+							return &t
+						case int:
+							v16 := int16(t)
+							return &v16
+						}
+					}
+					return nil
+				}(),
 				UserAgent: c.GetHeader("User-Agent"),
 
 				ErrorPhase: "upstream",
 				ErrorType:  "upstream_error",
-				// Severity/retryability should reflect the upstream failure, not the final client status (200).
+				// Severity should reflect the upstream failure, not the final client status (200).
 				Severity:          classifyOpsSeverity("upstream_error", effectiveUpstreamStatus),
 				StatusCode:        status,
 				IsBusinessLimited: false,
@@ -634,9 +713,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				UpstreamErrorDetail:  upstreamErrorDetail,
 				UpstreamErrors:       events,
 
-				IsRetryable: classifyOpsIsRetryable("upstream_error", effectiveUpstreamStatus),
-				RetryCount:  0,
-				CreatedAt:   time.Now(),
+				CreatedAt: time.Now(),
 			}
 			applyOpsLatencyFieldsFromContext(c, entry)
 
@@ -659,10 +736,6 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				clientIP = ip
 				entry.ClientIP = &clientIP
 			}
-
-			// Store request headers/body only when an upstream error occurred to keep overhead minimal.
-			entry.RequestHeadersJSON = extractOpsRetryRequestHeaders(c)
-			attachOpsRequestBodyToEntry(c, entry)
 
 			// Skip logging if a passthrough rule with skip_monitoring=true matched.
 			if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
@@ -721,11 +794,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
 
-		phase := classifyOpsPhase(normalizedType, parsed.Message, parsed.Code)
-		isBusinessLimited := classifyOpsIsBusinessLimited(normalizedType, phase, parsed.Code, status, parsed.Message)
-
-		errorOwner := classifyOpsErrorOwner(phase, parsed.Message)
-		errorSource := classifyOpsErrorSource(phase, parsed.Message)
+		phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, normalizedType, parsed.Message, parsed.Code, status)
 
 		entry := &service.OpsInsertErrorLogInput{
 			RequestID:       requestID,
@@ -740,7 +809,30 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 				return ""
 			}(),
-			Stream:    stream,
+			Stream:           stream,
+			InboundEndpoint:  GetInboundEndpoint(c),
+			UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
+			RequestedModel:   modelName,
+			UpstreamModel: func() string {
+				if v, ok := c.Get(opsUpstreamModelKey); ok {
+					if s, ok := v.(string); ok {
+						return strings.TrimSpace(s)
+					}
+				}
+				return ""
+			}(),
+			RequestType: func() *int16 {
+				if v, ok := c.Get(opsRequestTypeKey); ok {
+					switch t := v.(type) {
+					case int16:
+						return &t
+					case int:
+						v16 := int16(t)
+						return &v16
+					}
+				}
+				return nil
+			}(),
 			UserAgent: c.GetHeader("User-Agent"),
 
 			ErrorPhase:        phase,
@@ -757,9 +849,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			ErrorSource: errorSource,
 			ErrorOwner:  errorOwner,
 
-			IsRetryable: classifyOpsIsRetryable(normalizedType, status),
-			RetryCount:  0,
-			CreatedAt:   time.Now(),
+			CreatedAt: time.Now(),
 		}
 		applyOpsLatencyFieldsFromContext(c, entry)
 
@@ -837,18 +927,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			entry.ClientIP = &clientIP
 		}
 
-		// Persist only a minimal, whitelisted set of request headers to improve retry fidelity.
-		// Do NOT store Authorization/Cookie/etc.
-		entry.RequestHeadersJSON = extractOpsRetryRequestHeaders(c)
-		attachOpsRequestBodyToEntry(c, entry)
-
 		enqueueOpsErrorLog(ops, entry)
 	}
-}
-
-var opsRetryRequestHeaderAllowlist = []string{
-	"anthropic-beta",
-	"anthropic-version",
 }
 
 // isCountTokensRequest checks if the request is a count_tokens request
@@ -857,32 +937,6 @@ func isCountTokensRequest(c *gin.Context) bool {
 		return false
 	}
 	return strings.Contains(c.Request.URL.Path, "/count_tokens")
-}
-
-func extractOpsRetryRequestHeaders(c *gin.Context) *string {
-	if c == nil || c.Request == nil {
-		return nil
-	}
-
-	headers := make(map[string]string, 4)
-	for _, key := range opsRetryRequestHeaderAllowlist {
-		v := strings.TrimSpace(c.GetHeader(key))
-		if v == "" {
-			continue
-		}
-		// Keep headers small even if a client sends something unexpected.
-		headers[key] = truncateString(v, 512)
-	}
-	if len(headers) == 0 {
-		return nil
-	}
-
-	raw, err := json.Marshal(headers)
-	if err != nil {
-		return nil
-	}
-	s := string(raw)
-	return &s
 }
 
 func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
@@ -991,7 +1045,7 @@ func guessPlatformFromPath(path string) string {
 		return service.PlatformAntigravity
 	case strings.HasPrefix(p, "/v1beta/"):
 		return service.PlatformGemini
-	case strings.Contains(p, "/responses"):
+	case strings.Contains(p, "/responses"), strings.Contains(p, "/images/"):
 		return service.PlatformOpenAI
 	default:
 		return ""
@@ -1024,9 +1078,9 @@ func normalizeOpsErrorType(errType string, code string) string {
 		return errType
 	}
 	switch strings.TrimSpace(code) {
-	case "INSUFFICIENT_BALANCE":
+	case opsCodeInsufficientBalance:
 		return "billing_error"
-	case "USAGE_LIMIT_EXCEEDED", "SUBSCRIPTION_NOT_FOUND", "SUBSCRIPTION_INVALID":
+	case opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid:
 		return "subscription_error"
 	default:
 		return "api_error"
@@ -1037,8 +1091,10 @@ func classifyOpsPhase(errType, message, code string) string {
 	msg := strings.ToLower(message)
 	// Standardized phases: request|auth|routing|upstream|network|internal
 	// Map billing/concurrency/response => request; scheduling => routing.
-	switch strings.TrimSpace(code) {
-	case "INSUFFICIENT_BALANCE", "USAGE_LIMIT_EXCEEDED", "SUBSCRIPTION_NOT_FOUND", "SUBSCRIPTION_INVALID":
+	if isOpsClientAuthError(code, msg) {
+		return "auth"
+	}
+	if isOpsLocalBusinessLimitError(code, msg) {
 		return "request"
 	}
 
@@ -1057,7 +1113,7 @@ func classifyOpsPhase(errType, message, code string) string {
 	case "upstream_error", "overloaded_error":
 		return "upstream"
 	case "api_error":
-		if strings.Contains(msg, "no available accounts") {
+		if isOpsNoAvailableAccountMessage(msg) {
 			return "routing"
 		}
 		return "internal"
@@ -1083,27 +1139,34 @@ func classifyOpsSeverity(errType string, status int) string {
 	return "P3"
 }
 
-func classifyOpsIsRetryable(errType string, statusCode int) bool {
-	switch errType {
-	case "authentication_error", "invalid_request_error":
-		return false
-	case "timeout_error":
-		return true
-	case "rate_limit_error":
-		// May be transient (upstream or queue); retry can help.
-		return true
-	case "billing_error", "subscription_error":
-		return false
-	case "upstream_error", "overloaded_error":
-		return statusCode >= 500 || statusCode == 429 || statusCode == 529
-	default:
-		return statusCode >= 500
+func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status int) (phase string, isBusinessLimited bool, errorOwner string, errorSource string) {
+	phase = classifyOpsPhase(errType, message, code)
+	routingCapacityLimited := isOpsRoutingCapacityLimited(c)
+	clientBusinessLimited := service.HasOpsClientBusinessLimited(c)
+	upstreamError := hasOpsUpstreamErrorContext(c)
+	if upstreamError && !routingCapacityLimited {
+		phase = "upstream"
 	}
+	if clientBusinessLimited && !upstreamError && !routingCapacityLimited {
+		phase = "auth"
+	}
+	if routingCapacityLimited {
+		phase = "routing"
+	}
+	msg := strings.ToLower(message)
+	localClientAuthError := !upstreamError && phase == "auth" && isOpsClientAuthError(code, msg)
+	localBusinessLimited := !upstreamError && classifyOpsIsBusinessLimited(errType, phase, code, status, message, localClientAuthError)
+	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited
+	errorOwner = classifyOpsErrorOwner(phase, message)
+	errorSource = classifyOpsErrorSource(phase, message)
+	return phase, isBusinessLimited, errorOwner, errorSource
 }
 
-func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string) bool {
-	switch strings.TrimSpace(code) {
-	case "INSUFFICIENT_BALANCE", "USAGE_LIMIT_EXCEEDED", "SUBSCRIPTION_NOT_FOUND", "SUBSCRIPTION_INVALID", "USER_INACTIVE":
+func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {
+	if len(localClientAuthError) > 0 && localClientAuthError[0] {
+		return true
+	}
+	if isOpsLocalBusinessLimitError(code, strings.ToLower(message)) {
 		return true
 	}
 	if phase == "billing" || phase == "concurrency" {
@@ -1116,6 +1179,82 @@ func classifyOpsIsBusinessLimited(errType, phase, code string, status int, messa
 	}
 	_ = status
 	return false
+}
+
+func isOpsClientAuthError(code string, msg string) bool {
+	switch strings.TrimSpace(code) {
+	case opsCodeInvalidAPIKey,
+		opsCodeAPIKeyRequired,
+		opsCodeAPIKeyExpired,
+		opsCodeAPIKeyDisabled,
+		opsCodeUserNotFound,
+		opsCodeUserInactive:
+		return true
+	}
+	return strings.Contains(msg, "invalid api key") ||
+		strings.Contains(msg, "api key is required") ||
+		strings.Contains(msg, "api key is disabled") ||
+		strings.Contains(msg, "user associated with api key not found") ||
+		strings.Contains(msg, "user account is not active")
+}
+
+func isOpsLocalBusinessLimitError(code string, msg string) bool {
+	switch strings.TrimSpace(code) {
+	case opsCodeInsufficientBalance,
+		opsCodeUsageLimitExceeded,
+		opsCodeSubscriptionNotFound,
+		opsCodeSubscriptionInvalid,
+		opsCodeAPIKeyQuotaExhausted,
+		opsCodeAPIKeyQueryDeprecated:
+		return true
+	}
+	return strings.Contains(msg, "api key in query parameter is deprecated") ||
+		strings.Contains(msg, "query parameter api_key is deprecated") ||
+		strings.Contains(msg, "no active subscription found for this group") ||
+		strings.Contains(msg, opsErrInsufficientBalance) ||
+		strings.Contains(msg, "insufficient account balance") ||
+		strings.Contains(msg, "api key group platform is not gemini") ||
+		strings.Contains(msg, "api key 额度已用完") ||
+		strings.Contains(msg, "api key 5小时限额已用完") ||
+		strings.Contains(msg, "api key 日限额已用完") ||
+		strings.Contains(msg, "api key 7天限额已用完") ||
+		strings.Contains(msg, "daily usage limit exceeded") ||
+		strings.Contains(msg, "weekly usage limit exceeded") ||
+		strings.Contains(msg, "monthly usage limit exceeded") ||
+		strings.Contains(msg, "requests-per-minute limit exceeded")
+}
+
+func hasOpsUpstreamErrorContext(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	if v, ok := c.Get(service.OpsUpstreamStatusCodeKey); ok {
+		switch code := v.(type) {
+		case int:
+			if code > 0 {
+				return true
+			}
+		case int64:
+			if code > 0 {
+				return true
+			}
+		}
+	}
+	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
+		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func isOpsNoAvailableAccountMessage(message string) bool {
+	msg := strings.ToLower(message)
+	return strings.Contains(msg, opsErrNoAvailableAccounts) ||
+		strings.Contains(msg, "no available account") ||
+		strings.Contains(msg, "no available gemini accounts") ||
+		strings.Contains(msg, "no available openai accounts") ||
+		strings.Contains(msg, "no available compatible accounts")
 }
 
 func classifyOpsErrorOwner(phase string, message string) string {
@@ -1197,21 +1336,30 @@ func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message
 
 	// Check if context canceled errors should be ignored (client disconnects)
 	if settings.IgnoreContextCanceled {
-		if strings.Contains(msgLower, "context canceled") || strings.Contains(bodyLower, "context canceled") {
+		if strings.Contains(msgLower, opsErrContextCanceled) || strings.Contains(bodyLower, opsErrContextCanceled) {
 			return true
 		}
 	}
 
 	// Check if "no available accounts" errors should be ignored
 	if settings.IgnoreNoAvailableAccounts {
-		if strings.Contains(msgLower, "no available accounts") || strings.Contains(bodyLower, "no available accounts") {
+		if strings.Contains(msgLower, opsErrNoAvailableAccounts) || strings.Contains(bodyLower, opsErrNoAvailableAccounts) {
 			return true
 		}
 	}
 
 	// Check if invalid/missing API key errors should be ignored (user misconfiguration)
 	if settings.IgnoreInvalidApiKeyErrors {
-		if strings.Contains(bodyLower, "invalid_api_key") || strings.Contains(bodyLower, "api_key_required") {
+		if strings.Contains(bodyLower, opsErrInvalidAPIKey) || strings.Contains(bodyLower, opsErrAPIKeyRequired) {
+			return true
+		}
+	}
+
+	// Check if insufficient balance errors should be ignored
+	if settings.IgnoreInsufficientBalanceErrors {
+		if strings.Contains(bodyLower, opsErrInsufficientBalance) || strings.Contains(bodyLower, opsErrInsufficientAccountBalance) ||
+			strings.Contains(bodyLower, opsErrInsufficientQuota) ||
+			strings.Contains(msgLower, opsErrInsufficientBalance) || strings.Contains(msgLower, opsErrInsufficientAccountBalance) {
 			return true
 		}
 	}

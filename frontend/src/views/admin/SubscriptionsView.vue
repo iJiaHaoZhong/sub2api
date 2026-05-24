@@ -81,6 +81,14 @@
                 @change="applyFilters"
               />
             </div>
+            <div class="w-full sm:w-40">
+              <Select
+                v-model="filters.platform"
+                :options="platformFilterOptions"
+                :placeholder="t('admin.subscriptions.allPlatforms')"
+                @change="applyFilters"
+              />
+            </div>
           </div>
 
           <!-- Right: Actions -->
@@ -144,6 +152,13 @@
                 </div>
               </div>
             </div>
+            <button
+              @click="showGuideModal = true"
+              class="btn btn-secondary"
+              :title="t('admin.subscriptions.guide.showGuide')"
+            >
+              <Icon name="questionCircle" size="md" />
+            </button>
             <button @click="showAssignModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.subscriptions.assignSubscription') }}
@@ -159,6 +174,8 @@
           :data="subscriptions"
           :loading="loading"
           :server-side-sort="true"
+          default-sort-key="created_at"
+          default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-user="{ row }">
@@ -229,7 +246,7 @@
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  <span>{{ formatResetTime(row.daily_window_start, 'daily') }}</span>
+                  <span>{{ formatDailyUsageWindow(row) }}</span>
                 </div>
               </div>
 
@@ -638,6 +655,85 @@
       @confirm="confirmResetQuota"
       @cancel="showResetQuotaConfirm = false"
     />
+    <!-- Subscription Guide Modal -->
+    <teleport to="body">
+      <transition name="modal">
+        <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showGuideModal = false">
+          <div class="fixed inset-0 bg-black/50" @click="showGuideModal = false"></div>
+          <div class="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
+            <button type="button" class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" @click="showGuideModal = false">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+
+            <h2 class="mb-4 text-lg font-bold text-gray-900 dark:text-white">{{ t('admin.subscriptions.guide.title') }}</h2>
+            <p class="mb-5 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.subscriptions.guide.subtitle') }}</p>
+
+            <!-- Step 1 -->
+            <div class="mb-5">
+              <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">1</span>
+                {{ t('admin.subscriptions.guide.step1.title') }}
+              </h3>
+              <ol class="ml-8 list-decimal space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                <li>{{ t('admin.subscriptions.guide.step1.line1') }}</li>
+                <li>{{ t('admin.subscriptions.guide.step1.line2') }}</li>
+                <li>{{ t('admin.subscriptions.guide.step1.line3') }}</li>
+              </ol>
+              <div class="ml-8 mt-2">
+                <router-link
+                  to="/admin/groups"
+                  @click="showGuideModal = false"
+                  class="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                >
+                  {{ t('admin.subscriptions.guide.step1.link') }}
+                  <Icon name="arrowRight" size="xs" />
+                </router-link>
+              </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="mb-5">
+              <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">2</span>
+                {{ t('admin.subscriptions.guide.step2.title') }}
+              </h3>
+              <ol class="ml-8 list-decimal space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                <li>{{ t('admin.subscriptions.guide.step2.line1') }}</li>
+                <li>{{ t('admin.subscriptions.guide.step2.line2') }}</li>
+                <li>{{ t('admin.subscriptions.guide.step2.line3') }}</li>
+              </ol>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="mb-5">
+              <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">3</span>
+                {{ t('admin.subscriptions.guide.step3.title') }}
+              </h3>
+              <div class="ml-8 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-600">
+                <table class="w-full text-sm">
+                  <tbody>
+                    <tr v-for="(row, i) in guideActionRows" :key="i" class="border-b border-gray-100 dark:border-dark-700 last:border-0">
+                      <td class="whitespace-nowrap bg-gray-50 px-3 py-2 font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-300">{{ row.action }}</td>
+                      <td class="px-3 py-2 text-gray-600 dark:text-gray-400">{{ row.desc }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Tip -->
+            <div class="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+              {{ t('admin.subscriptions.guide.tip') }}
+            </div>
+
+            <div class="mt-4 text-right">
+              <button type="button" class="btn btn-primary btn-sm" @click="showGuideModal = false">{{ t('common.close') }}</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </teleport>
   </AppLayout>
 </template>
 
@@ -650,6 +746,7 @@ import type { UserSubscription, Group, GroupPlatform, SubscriptionType } from '@
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatDateOnly } from '@/utils/format'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -661,6 +758,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -673,6 +771,15 @@ interface GroupOption {
   subscriptionType: SubscriptionType
   rate: number
 }
+
+// Guide modal state
+const showGuideModal = ref(false)
+
+const guideActionRows = computed(() => [
+  { action: t('admin.subscriptions.guide.actions.adjust'), desc: t('admin.subscriptions.guide.actions.adjustDesc') },
+  { action: t('admin.subscriptions.guide.actions.resetQuota'), desc: t('admin.subscriptions.guide.actions.resetQuotaDesc') },
+  { action: t('admin.subscriptions.guide.actions.revoke'), desc: t('admin.subscriptions.guide.actions.revokeDesc') }
+])
 
 // User column display mode: 'email' or 'username'
 const userColumnMode = ref<'email' | 'username'>('email')
@@ -813,6 +920,7 @@ let userSearchTimeout: ReturnType<typeof setTimeout> | null = null
 const filters = reactive({
   status: 'active',
   group_id: '',
+  platform: '',
   user_id: null as number | null
 })
 
@@ -824,7 +932,7 @@ const sortState = reactive({
 
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: getPersistedPageSize(),
   total: 0,
   pages: 0
 })
@@ -853,6 +961,14 @@ const extendForm = reactive({
 const groupOptions = computed(() => [
   { value: '', label: t('admin.subscriptions.allGroups') },
   ...groups.value.map((g) => ({ value: g.id.toString(), label: g.name }))
+])
+
+const platformFilterOptions = computed(() => [
+  { value: '', label: t('admin.subscriptions.allPlatforms') },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' }
 ])
 
 // Group options for assign (only subscription type groups)
@@ -890,6 +1006,7 @@ const loadSubscriptions = async () => {
       {
         status: (filters.status as any) || undefined,
         group_id: filters.group_id ? parseInt(filters.group_id) : undefined,
+        platform: filters.platform || undefined,
         user_id: filters.user_id || undefined,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order
@@ -1197,8 +1314,41 @@ const getProgressClass = (used: number | null | undefined, limit: number | null)
   return 'bg-green-500'
 }
 
+const formatResetDuration = (parts: RemainingDurationParts): string => {
+  if (parts.days > 0) {
+    return t('admin.subscriptions.resetInDaysHours', { days: parts.days, hours: parts.hours })
+  }
+
+  if (parts.hours > 0) {
+    return t('admin.subscriptions.resetInHoursMinutes', { hours: parts.hours, minutes: parts.minutes })
+  }
+
+  return t('admin.subscriptions.resetInMinutes', { minutes: parts.minutes })
+}
+
+const formatQuotaEndDuration = (parts: RemainingDurationParts): string => {
+  if (parts.days > 0) {
+    return t('admin.subscriptions.quotaEndsInDaysHours', { days: parts.days, hours: parts.hours })
+  }
+
+  if (parts.hours > 0) {
+    return t('admin.subscriptions.quotaEndsInHoursMinutes', { hours: parts.hours, minutes: parts.minutes })
+  }
+
+  return t('admin.subscriptions.quotaEndsInMinutes', { minutes: parts.minutes })
+}
+
+const formatDailyUsageWindow = (subscription: UserSubscription): string => {
+  if (isOneTimeDailyQuota(subscription) && subscription.expires_at) {
+    const parts = getRemainingDurationParts(subscription.expires_at)
+    return parts ? formatQuotaEndDuration(parts) : t('admin.subscriptions.windowNotActive')
+  }
+
+  return formatResetTime(subscription.daily_window_start, 'daily')
+}
+
 // Format reset time based on window start and period type
-const formatResetTime = (windowStart: string, period: 'daily' | 'weekly' | 'monthly'): string => {
+const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' | 'monthly'): string => {
   if (!windowStart) return t('admin.subscriptions.windowNotActive')
 
   const start = new Date(windowStart)
@@ -1218,21 +1368,9 @@ const formatResetTime = (windowStart: string, period: 'daily' | 'weekly' | 'mont
       break
   }
 
-  const diffMs = resetTime.getTime() - now.getTime()
-  if (diffMs <= 0) return t('admin.subscriptions.windowNotActive')
+  const parts = getRemainingDurationParts(resetTime, now)
 
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const days = Math.floor(diffSeconds / 86400)
-  const hours = Math.floor((diffSeconds % 86400) / 3600)
-  const minutes = Math.floor((diffSeconds % 3600) / 60)
-
-  if (days > 0) {
-    return t('admin.subscriptions.resetInDaysHours', { days, hours })
-  } else if (hours > 0) {
-    return t('admin.subscriptions.resetInHoursMinutes', { hours, minutes })
-  } else {
-    return t('admin.subscriptions.resetInMinutes', { minutes })
-  }
+  return parts ? formatResetDuration(parts) : t('admin.subscriptions.windowNotActive')
 }
 
 // Handle click outside to close dropdowns

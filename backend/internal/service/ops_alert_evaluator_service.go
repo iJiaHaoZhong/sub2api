@@ -88,6 +88,7 @@ func (s *OpsAlertEvaluatorService) Start() {
 		if s.stopCh == nil {
 			s.stopCh = make(chan struct{})
 		}
+		s.wg.Add(1)
 		go s.run()
 	})
 }
@@ -105,7 +106,6 @@ func (s *OpsAlertEvaluatorService) Stop() {
 }
 
 func (s *OpsAlertEvaluatorService) run() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 
 	// Start immediately to produce early feedback in ops dashboard.
@@ -686,6 +686,21 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		if !s.emailLimiter.Allow(time.Now().UTC()) {
 			continue
 		}
+		if s.emailService.notificationEmailService != nil {
+			if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
+				Event:          NotificationEmailEventOpsAlert,
+				RecipientEmail: addr,
+				RecipientName:  emailRecipientName(addr),
+				SourceType:     "ops_alert",
+				SourceID:       fmt.Sprintf("%d", event.ID),
+				Variables:      opsAlertEmailVariables(rule, event),
+			}); err == nil {
+				anySent = true
+				continue
+			} else if !shouldFallbackNotificationEmail(err) {
+				continue
+			}
+		}
 		if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
 			// Ignore per-recipient failures; continue best-effort.
 			continue
@@ -697,6 +712,46 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
 	}
 	return anySent
+}
+
+func opsAlertEmailVariables(rule *OpsAlertRule, event *OpsAlertEvent) map[string]string {
+	variables := map[string]string{
+		"rule_name":         "-",
+		"severity":          "-",
+		"alert_status":      "-",
+		"metric_type":       "-",
+		"operator":          "-",
+		"metric_value":      "-",
+		"threshold_value":   "-",
+		"triggered_at":      time.Now().UTC().Format(time.RFC3339),
+		"alert_description": "-",
+	}
+	if rule != nil {
+		variables["rule_name"] = strings.TrimSpace(rule.Name)
+		variables["severity"] = strings.TrimSpace(rule.Severity)
+		variables["metric_type"] = strings.TrimSpace(rule.MetricType)
+		variables["operator"] = strings.TrimSpace(rule.Operator)
+		variables["threshold_value"] = fmt.Sprintf("%.2f", rule.Threshold)
+		if strings.TrimSpace(rule.Description) != "" {
+			variables["alert_description"] = strings.TrimSpace(rule.Description)
+		}
+	}
+	if event != nil {
+		variables["alert_status"] = strings.TrimSpace(event.Status)
+		if event.MetricValue != nil {
+			variables["metric_value"] = fmt.Sprintf("%.2f", *event.MetricValue)
+		}
+		if event.ThresholdValue != nil {
+			variables["threshold_value"] = fmt.Sprintf("%.2f", *event.ThresholdValue)
+		}
+		if !event.FiredAt.IsZero() {
+			variables["triggered_at"] = event.FiredAt.UTC().Format(time.RFC3339)
+		}
+		if strings.TrimSpace(event.Description) != "" {
+			variables["alert_description"] = strings.TrimSpace(event.Description)
+		}
+	}
+	return variables
 }
 
 func buildOpsAlertEmailBody(rule *OpsAlertRule, event *OpsAlertEvent) string {
@@ -848,7 +903,9 @@ func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, loc
 		return nil, false
 	}
 	return func() {
-		_, _ = opsAlertEvaluatorReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer releaseCancel()
+		_, _ = opsAlertEvaluatorReleaseScript.Run(releaseCtx, s.redisClient, []string{key}, s.instanceID).Result()
 	}, true
 }
 

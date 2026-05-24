@@ -110,6 +110,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	}
 
 	model := c.Query("model")
+	billingMode := strings.TrimSpace(c.Query("billing_mode"))
 
 	var requestType *int16
 	var stream *bool
@@ -159,12 +160,17 @@ func (h *UsageHandler) List(c *gin.Context) {
 			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
 			return
 		}
-		// Set end time to end of day
-		t = t.Add(24*time.Hour - time.Nanosecond)
+		// Use half-open range [start, end), move to next calendar day start (DST-safe).
+		t = t.AddDate(0, 0, 1)
 		endTime = &t
 	}
 
-	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
+	params := pagination.PaginationParams{
+		Page:      page,
+		PageSize:  pageSize,
+		SortBy:    c.DefaultQuery("sort_by", "created_at"),
+		SortOrder: c.DefaultQuery("sort_order", "desc"),
+	}
 	filters := usagestats.UsageLogFilters{
 		UserID:      userID,
 		APIKeyID:    apiKeyID,
@@ -174,6 +180,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
+		BillingMode: billingMode,
 		StartTime:   startTime,
 		EndTime:     endTime,
 		ExactTotal:  exactTotal,
@@ -234,6 +241,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	}
 
 	model := c.Query("model")
+	billingMode := strings.TrimSpace(c.Query("billing_mode"))
 
 	var requestType *int16
 	var stream *bool
@@ -285,7 +293,8 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
 			return
 		}
-		endTime = endTime.Add(24*time.Hour - time.Nanosecond)
+		// 与 SQL 条件 created_at < end 对齐，使用次日 00:00 作为上边界（DST-safe）。
+		endTime = endTime.AddDate(0, 0, 1)
 	} else {
 		period := c.DefaultQuery("period", "today")
 		switch period {
@@ -311,6 +320,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
+		BillingMode: billingMode,
 		StartTime:   &startTime,
 		EndTime:     &endTime,
 	}
@@ -334,7 +344,7 @@ func (h *UsageHandler) SearchUsers(c *gin.Context) {
 	}
 
 	// Limit to 30 results
-	users, _, err := h.adminService.ListUsers(c.Request.Context(), 1, 30, service.UserListFilters{Search: keyword})
+	users, _, err := h.adminService.ListUsers(c.Request.Context(), 1, 30, service.UserListFilters{Search: keyword}, "email", "asc")
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
