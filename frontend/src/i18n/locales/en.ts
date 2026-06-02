@@ -467,10 +467,10 @@ export default {
     invitationCodeInvalid: 'Invalid or used invitation code',
     invitationCodeValidating: 'Validating invitation code...',
     invitationCodeInvalidCannotRegister: 'Invalid invitation code. Please check and try again',
-    oauthOrContinue: 'or continue with others',
+    oauthOrContinue: 'or continue with another method',
     linuxdo: {
       signIn: 'Continue with Linux.do',
-      orContinue: 'or continue with email',
+      orContinue: 'or continue with another method',
       callbackTitle: 'Signing you in',
       callbackProcessing: 'Completing login, please wait...',
       callbackHint: 'If you are not redirected automatically, go back to the login page and try again.',
@@ -634,6 +634,15 @@ export default {
     platformBreakdownEmpty: 'No platform usage yet',
     platformCount: '{count} platforms',
     platformOther: 'Other',
+    platformQuota: {
+      title: 'Quota Usage',
+      daily: 'Daily',
+      weekly: 'Weekly',
+      monthly: 'Monthly (30-day rolling)',
+      resetsAt: 'Resets {time}',
+      noLimit: 'unlimited',
+      disabled: 'Disabled',
+    },
     tokenUsageTrend: 'Token Usage Trend',
     noDataAvailable: 'No data available',
     model: 'Model',
@@ -1793,6 +1802,7 @@ export default {
         groups: 'Groups',
         subscriptions: 'Subscriptions',
         balance: 'Balance',
+        balancePlatformQuota: 'Balance (Platform Quota)',
         usage: 'Usage',
         usageAnthropic: 'Usage (Claude)',
         usageOpenAI: 'Usage (OpenAI)',
@@ -1985,6 +1995,41 @@ export default {
         failedToReorder: 'Failed to update order',
         keyExists: 'Attribute key already exists',
         dragToReorder: 'Drag to reorder'
+      },
+      platformQuota: {
+        menuItem: 'Platform Quotas',
+        title: 'Platform Quotas',
+        subtitle: 'Configure daily / weekly / monthly USD usage limits for each upstream platform for user {email}',
+        columns: {
+          platform: 'Platform',
+          daily: 'Daily (USD)',
+          weekly: 'Weekly (USD)',
+          monthly: 'Monthly (USD, 30-day rolling)',
+          usage: 'Current Usage',
+        },
+        placeholder: 'unlimited',
+        save: 'Save',
+        saving: 'Saving...',
+        cancel: 'Cancel',
+        clearAll: 'Clear All (remove all limits)',
+        clearAllConfirm: 'Clear daily / weekly / monthly limits for ALL platforms? All platforms will become "unlimited" with no local undo — you must manually re-enter values before saving.',
+        reset: {
+          button: 'Reset window',
+          confirm: 'Reset the {window} usage for {platform} for this user? This is effective immediately.',
+          success: 'Reset {platform} {window} usage',
+          failed: 'Reset failed',
+        },
+        updateSuccess: 'Platform quotas updated',
+        updateFailed: 'Save failed',
+        loadFailed: 'Load failed',
+        hint: 'Empty = no limit for that window.',
+        windowDaily: 'daily',
+        windowWeekly: 'weekly',
+        windowMonthly: 'monthly',
+        cellNotConfigured: 'Not configured',
+        cellColumnTooltip: 'Only platforms with a limit are shown',
+        subscriptionWarning: 'This user has an active subscription. Platform quotas only apply to balance (standard) mode requests; subscription mode requests are not subject to these limits.',
+        invalidNumber: 'The following fields contain invalid numbers. Please fix them before saving: {fields}',
       }
     },
 
@@ -2104,6 +2149,7 @@ export default {
         openai: 'OpenAI',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        kiro: 'Kiro',
       },
       deleteConfirm:
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",
@@ -2124,6 +2170,13 @@ export default {
         validityHint: 'Number of days the subscription is valid when assigned to a user',
         noLimit: 'No limit'
       },
+      kiroCache: {
+        title: 'Kiro Cache Emulation',
+        description: 'Simulate Anthropic prompt cache usage for this Kiro group only.',
+        enabled: 'Enable cache emulation',
+        ratio: 'Cache ratio',
+        ratioHint: '0 to 1. For example, 0.5 applies half of the simulated cache tokens.'
+      },
       imagePricing: {
         title: 'Image Generation Pricing',
         description: 'Configure image generation access and base image prices. Leave empty to use default prices.',
@@ -2133,6 +2186,12 @@ export default {
         modeHint: 'By default, image billing uses image price × current effective group multiplier. Independent mode uses image price × image multiplier.',
         finalPricePreview: 'Final per-image price preview',
         notConfigured: 'Not configured'
+      },
+      modelsList: {
+        title: 'Custom /v1/models Model List',
+        hint: 'Only changes the /v1/models response. Whitelist model calls and account routing are unchanged.',
+        loading: 'Loading model list...',
+        empty: 'No displayable models'
       },
       claudeCode: {
         title: 'Claude Code Client Restriction',
@@ -2548,14 +2607,37 @@ export default {
       modelFilterIncludeSummary: 'Applies to {count} models',
       modelFilterExcludeSummary: 'Excludes {count} models',
       emptyLogs: 'No audit records',
+      preBlockSyncStatus: 'Pre-Block Sync Status',
+      preBlockSyncHint: 'Live counters for the synchronous moderation path, excluding async record tasks.',
+      preBlockActive: 'Sync Processing',
+      preBlockActiveHint: 'Currently checking',
+      preBlockChecked: 'Checked',
+      preBlockCheckedHint: 'Entered pre-block path',
+      preBlockAllowed: 'Allowed',
+      preBlockAllowedHint: 'No block triggered',
+      preBlockBlocked: 'Blocked',
+      preBlockBlockedHint: 'Rejected after hit',
+      preBlockErrors: 'Audit Errors',
+      preBlockErrorsHint: 'Failed or no usable key',
+      preBlockAvgLatency: 'Avg Latency',
+      preBlockAvgLatencyHint: 'Synchronous path average',
+      preBlockAPIKeyLoad: 'Audit Key Load',
+      preBlockAPIKeyLoadHint: 'Synchronous pre-block checks round-robin usable audit keys directly.',
+      preBlockAPIKeyLoadSummary: 'Sync active {active} / usable keys {available}, {total} total, worker: {workerActive} / {workerTotal}',
+      preBlockAPIKeyTotals: 'Total {total}, success {success}, errors {errors}',
+      preBlockAPIKeyLoadEmpty: 'No audit key load data yet',
+      preBlockKeyActiveShort: 'Active',
+      preBlockKeyTotalShort: 'Total',
+      preBlockKeyAvgShort: 'Avg',
+      preBlockKeyLastShort: 'Last',
       workerStatus: 'Worker Runtime',
-      workerStatusHint: 'Queue and worker pool status for asynchronous observation tasks.',
+      workerStatusHint: 'Queue and worker pool status for async audit tasks and pre-block record tasks, excluding synchronous pre-block checks.',
       workerPool: 'Worker Pool',
       workerPoolMeta: '{active} processing, {idle} idle and ready, {total} total',
       queueUsage: 'Queue Usage',
       activeWorkers: 'Processing',
       idleWorkers: 'Idle Ready',
-      workerActive: 'Processing an asynchronous audit task',
+      workerActive: 'Processing an async audit or record task',
       workerIdle: 'Started, idle and ready',
       workerDisabled: 'Risk control or content audit is disabled',
       processed: 'Processed',
@@ -2564,11 +2646,17 @@ export default {
       lastCleanup: 'Last cleanup: {time}',
       cleanupStats: 'Last cleanup deleted {hit} hits and {nonHit} non-hits',
       riskSwitchOff: 'System switch off',
+      riskThresholds: 'Risk Thresholds',
+      riskThresholdsHint: 'Adjust hit thresholds by OpenAI Moderations category. Scores greater than or equal to the threshold count as hits.',
+      riskThresholdDefault: 'Default {value}',
+      riskThresholdReset: 'Restore defaults',
+      riskThresholdPercent: 'Threshold percentage',
       tabs: {
         basic: 'Basic',
         scope: 'Scope',
         runtime: 'Runtime',
         response: 'Hit Notice',
+        riskThresholds: 'Risk Thresholds',
         keywords: 'Keyword Block',
         retention: 'Retention',
       },
@@ -2971,6 +3059,7 @@ export default {
         openai: 'OpenAI',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        kiro: 'Kiro',
       },
       types: {
         oauth: 'OAuth',
@@ -2978,6 +3067,8 @@ export default {
         responsesApi: 'Responses API',
         googleOauth: 'Google OAuth',
         codeAssist: 'Code Assist',
+        kiroOauth: 'Social OAuth / AWS Builder ID / Import',
+        kiroApikey: 'Connect via Base URL + API Key',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
         upstream: 'Upstream',
@@ -2999,8 +3090,12 @@ export default {
         rateLimitedAutoResume: 'Auto resumes in {time}',
         modelRateLimitedUntil: '{model} rate limited until {time}',
         modelCreditOveragesUntil: '{model} using AI Credits until {time}',
+        overageActive: 'Overage',
+        overageActiveUntil: 'Using overage until the reset window at {time}',
         creditsExhausted: 'Credits Exhausted',
         creditsExhaustedUntil: 'AI Credits exhausted, expected recovery at {time}',
+        overageExhausted: 'Overage Exhausted',
+        overageExhaustedUntil: 'Overage exhausted, expected recovery at {time}',
         overloadedUntil: 'Overloaded until {time}',
         viewTempUnschedDetails: 'View temp unschedulable details'
       },
@@ -3021,9 +3116,11 @@ export default {
         usageWindows: 'Usage Windows',
         proxy: 'Proxy',
         lastUsed: 'Last Used',
+        createdAt: 'Created',
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
+      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by sub2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within sub2api.',
       allPrivacyModes: 'All Privacy States',
       privacyUnset: 'Unset',
       privacyTrainingOff: 'Training data sharing disabled',
@@ -3189,6 +3286,10 @@ export default {
       bulkDeleteSuccess: 'Deleted {count} account(s)',
       bulkDeletePartial: 'Partially deleted: {success} succeeded, {failed} failed',
       bulkDeleteFailed: 'Bulk delete failed',
+      bulkResetStatusTitle: 'Bulk Reset Status',
+      bulkResetStatusConfirm: 'Reset the status of {count} selected account(s)?',
+      bulkRefreshTokenTitle: 'Bulk Refresh Token',
+      bulkRefreshTokenConfirm: 'Refresh the token of {count} selected account(s)?',
       recoverState: 'Recover State',
       recoverStateHint: 'Used to recover error, rate-limit, and temporary unschedulable runtime state.',
       recoverStateSuccess: 'Account state recovered successfully',
@@ -3268,10 +3369,21 @@ export default {
           'Automatic passthrough is currently enabled: it only affects HTTP passthrough and does not disable WS mode.',
         responsesMode: 'Responses API support',
         responsesModeDesc:
-          'Only applies to OpenAI API Key accounts. Auto follows probe results; force modes override probing.',
+          'Only applies to the OpenAI API Key text forwarding path. Auto follows probe results; force modes override probing.',
         responsesModeAuto: 'Auto',
         responsesModeForceResponses: 'Force Responses',
         responsesModeForceChatCompletions: 'Force Chat Completions',
+        responsesModeTextDisabledHint:
+          'Not applicable when the Responses / Chat Completions endpoint is not enabled.',
+        endpointCapabilities: 'Endpoint capabilities',
+        endpointCapabilitiesDesc:
+          'Used by account routing. The text endpoint follows the Responses API support setting above and is shown as Responses, Chat Completions, or auto mode; Embeddings independently controls /v1/embeddings.',
+        capabilityResponses: 'Responses',
+        capabilityTextAuto: 'Responses / Chat Completions (Auto)',
+        capabilityResponsesAuto: 'Responses (auto probe)',
+        capabilityChatCompletions: 'Chat Completions',
+        capabilityChatCompletionsAuto: 'Chat Completions (auto probe)',
+        capabilityEmbeddings: 'Embeddings',
         responsesStatusAutoSupported: 'Auto probe: Responses',
         responsesStatusAutoUnsupported: 'Auto probe: Chat Completions',
         responsesStatusAutoUnknown: 'Auto probe: unknown',
@@ -3280,6 +3392,9 @@ export default {
         codexCLIOnly: 'Codex official clients only',
         codexCLIOnlyDesc:
           'Only applies to OpenAI OAuth. When enabled, only Codex official client families are allowed; when disabled, the gateway bypasses this restriction and keeps existing behavior.',
+        codexCLIOnlyAllowClaudeCode: "Also allow Claude Code's Codex plugin",
+        codexCLIOnlyAllowClaudeCodeDesc:
+          'Only takes effect when the switch above is on. Additionally allows requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without weakening blocking of other non-official clients.',
         codexImageGenerationBridge: 'Codex image-generation bridge',
         codexImageGenerationBridgeDesc:
           'Account policy takes precedence over channel and global settings. Only controls whether Codex requests through the /responses text endpoint receive the image_generation tool; standalone image-generation endpoints are unaffected.',
@@ -3311,6 +3426,10 @@ export default {
         testModeCompact: 'Compact probe',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
+      kiro: {
+        baseUrlHint: 'Enter the Base URL of the Kiro-compatible upstream',
+        apiKeyHint: 'API Key for that Kiro upstream',
+      },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',
         apiKeyPassthroughDesc:
@@ -3321,6 +3440,14 @@ export default {
         webSearchDefault: 'Default',
         webSearchEnabled: 'Enabled',
         webSearchDisabled: 'Disabled',
+        customHeaders: 'Custom Request Headers',
+        customHeadersDesc:
+          'Add custom headers to upstream API requests. Overrides existing headers with the same name. Auth headers (Authorization, x-api-key) are not allowed.',
+        customHeadersHint:
+          'Applied last, overrides existing values. Forbidden: Host, Content-Length, Authorization, x-api-key.',
+        headerNamePlaceholder: 'Header name',
+        headerValuePlaceholder: 'Header value',
+        headerAddRow: 'Add header',
       },
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',
@@ -3359,6 +3486,9 @@ export default {
       poolModeRetryCount: 'Same-Account Retries',
       poolModeRetryCountHint:
         'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
+      poolModeRetryStatusCodes: 'Retry Status Codes',
+      poolModeRetryStatusCodesHint:
+        'Comma-separated HTTP status codes (100-599) that trigger same-account retry in pool mode. Leave blank to use defaults ({default}).',
       customErrorCodes: 'Custom Error Codes',
       customErrorCodesHint: 'Only stop scheduling for selected error codes',
       customErrorCodesWarning:
@@ -3377,6 +3507,12 @@ export default {
         'When enabled, warmup requests like title generation will return mock responses without consuming upstream tokens',
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
+	  autoPause5hThreshold: '5h Usage Threshold (%)',
+	  autoPause7dThreshold: '7d Usage Threshold (%)',
+	  autoPauseThresholdHint: 'Leave empty or set 0 to use the global default threshold (configured in Ops settings); set a value to override the global default. Reaching the threshold only skips the account during scheduling and does not modify schedulable.',
+	  autoPause5hDisabled: 'Disable 5h auto-pause',
+	  autoPause7dDisabled: 'Disable 7d auto-pause',
+	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',
@@ -3697,20 +3833,65 @@ export default {
           authCode: 'Authorization URL or Code',
           authCodePlaceholder:
             'Option 1: Copy the complete URL\n(http://localhost:xxx/auth/callback?code=...)\nOption 2: Copy only the code parameter value',
-                    authCodeHint: 'You can copy the entire URL or just the code parameter value, the system will auto-detect',
-                    failedToGenerateUrl: 'Failed to generate Antigravity auth URL',
-                    missingExchangeParams: 'Missing code, session ID, or state',
-                    failedToExchangeCode: 'Failed to exchange Antigravity auth code',
-                    // Refresh Token auth
-                    refreshTokenAuth: 'Manual RT',
-                    refreshTokenDesc: 'Enter your existing Antigravity Refresh Token. Supports batch input (one per line). The system will automatically validate and create accounts.',
-                    refreshTokenPlaceholder: 'Paste your Antigravity Refresh Token...\nSupports multiple tokens, one per line',
-                    validating: 'Validating...',
-                    validateAndCreate: 'Validate & Create',
-                    pleaseEnterRefreshToken: 'Please enter Refresh Token',
-                    failedToValidateRT: 'Failed to validate Refresh Token'
-                  }
-                },      // Gemini specific (platform-wide)
+          authCodeHint: 'You can copy the entire URL or just the code parameter value, the system will auto-detect',
+          failedToGenerateUrl: 'Failed to generate Antigravity auth URL',
+          missingExchangeParams: 'Missing code, session ID, or state',
+          failedToExchangeCode: 'Failed to exchange Antigravity auth code',
+          refreshTokenAuth: 'Manual RT',
+          refreshTokenDesc: 'Enter your existing Antigravity Refresh Token. Supports batch input (one per line). The system will automatically validate and create accounts.',
+          refreshTokenPlaceholder: 'Paste your Antigravity Refresh Token...\nSupports multiple tokens, one per line',
+          validating: 'Validating...',
+          validateAndCreate: 'Validate & Create',
+          pleaseEnterRefreshToken: 'Please enter Refresh Token',
+          failedToValidateRT: 'Failed to validate Refresh Token'
+        },
+        kiro: {
+          title: 'Kiro Authorization',
+          followSteps: 'Follow these steps to authorize your Kiro account:',
+          step1GenerateUrl: 'Click the button below to generate the authorization URL',
+          generateAuthUrl: 'Generate Authorization URL',
+          step2OpenUrl: 'Open the URL in your browser and complete authorization',
+          openUrlDesc:
+            'Open the authorization URL in a new tab. The Kiro sign-in page will open at app.kiro.dev; choose Google or GitHub there. After approval, the browser may redirect to http://localhost:49153/oauth/callback and show an unreachable-page error; that is expected.',
+          step3EnterCode: 'Enter Callback URL or Code',
+          authCodeDesc:
+            'After authorization, copy the full callback URL from the browser address bar (recommended), or paste only the code parameter value below.',
+          authCode: 'Callback URL or Code',
+          authCodePlaceholder:
+            'Option 1 (recommended): Paste the full callback URL\n(http://localhost:49153/oauth/callback?code=...&state=...&login_option=github)\nOption 2: Paste only the code value',
+          authCodeHint:
+            'The system will auto-extract code/state and Kiro callback metadata from the URL. If the localhost page cannot be reached, copy the full URL from the address bar.',
+          importDialogTitle: 'Import Kiro Token',
+          authModeTitle: 'Kiro Authorization Method',
+          oauthTitle: 'Social OAuth',
+          oauthSubtitle: 'Browser-based auth with Google or GitHub',
+          oauthProviderTitle: 'Social Sign-In Provider',
+          googleTitle: 'Google',
+          githubTitle: 'GitHub',
+          googleDesc: 'Sign in to Kiro with your Google account',
+          githubDesc: 'Sign in to Kiro with your GitHub account',
+          idcTitle: 'AWS Builder ID / IDC',
+          importTitle: 'Import from Kiro IDE',
+          socialSubtitle: 'Google / GitHub sign-in',
+          idcSubtitle: 'AWS Builder ID or enterprise Identity Center',
+          googleOauth: 'Google OAuth',
+          githubOauth: 'GitHub OAuth',
+          idcLogin: 'Builder ID / IDC Login',
+          importTokenFile: 'Import Token File',
+          importSubtitle: 'Use this if you already signed in via Kiro IDE',
+          startUrlLabel: 'Builder ID / IDC Start URL',
+          idcStartUrlLabel: 'Builder ID / IDC Start URL',
+          startUrlPlaceholder: 'https://view.awsapps.com/start',
+          regionLabel: 'Region',
+          regionPlaceholder: 'us-east-1',
+          tokenJsonLabel: 'Kiro Token JSON',
+          tokenJsonHint: 'Sign in through Kiro IDE first, then paste the contents of `~/.aws/sso/cache/kiro-auth-token.json` here.',
+          deviceRegistrationLabel: 'Device Registration JSON',
+          deviceRegistrationHint: 'Optional. Only needed when the token file does not include full client details and only has `clientIdHash`.',
+          importAndUpdate: 'Import and Update'
+        }
+      },
+      // Gemini specific (platform-wide)
       gemini: {
         helpButton: 'Help',
         helpDialog: {
@@ -3852,6 +4033,7 @@ export default {
       claudeCodeAccount: 'Claude Code Account',
       openaiAccount: 'OpenAI Account',
       geminiAccount: 'Gemini Account',
+      kiroAccount: 'Kiro Account',
       antigravityAccount: 'Antigravity Account',
       inputMethod: 'Input Method',
       reAuthorizedSuccess: 'Account re-authorized successfully',
@@ -3927,6 +4109,12 @@ export default {
         gemini3Flash: 'G3F',
         gemini3Image: 'G31FI',
         claude: 'Claude',
+        kiroCredits: 'Credits',
+        kiroBonus: 'Bonus',
+        kiroReset: 'Reset',
+        kiroOverage: 'Overage',
+        kiroDaysLeft: '{days}d left',
+        kiroExpires: 'Expires',
         passiveSampled: 'Passive',
         activeQuery: 'Query'
       },
@@ -3949,6 +4137,13 @@ export default {
       copyLink: 'Copy Link',
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
+      kiroCooldown: 'Kiro Cooldown',
+      kiroSuspended: 'Kiro Suspended',
+      kiroProfileError: 'Profile Error',
+      kiroProfileHint: 'Resolve and save a valid profileArn for this account',
+      kiroUsageForbidden: 'Usage Forbidden',
+      kiroUsageForbiddenHint: 'Usage fetch is blocked for this account, but request forwarding may still work',
+      kiroRuntimeResetsAt: 'Auto resumes at {time}',
       rateLimited: 'Rate Limited',
       usageError: 'Fetch Error'
     },
@@ -4420,6 +4615,7 @@ export default {
       ipAddress: 'IP',
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
+      userDeletedBadge: 'Deleted',
       cleanup: {
         button: 'Cleanup',
         title: 'Cleanup Usage Records',
@@ -5092,6 +5288,11 @@ export default {
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
         aggregationHint: 'Pre-aggregation improves query performance for long time windows',
+        openaiQuotaAutoPause: 'OpenAI Account Quota Auto-pause',
+        openaiQuotaAutoPauseHint: 'When an OpenAI account reaches its 5h / 7d usage threshold, the scheduler skips it automatically and resumes once the window rolls over. Per-account thresholds take precedence over this global default.',
+        openaiQuotaAutoPauseDefault5h: 'Default 5h usage threshold (%)',
+        openaiQuotaAutoPauseDefault7d: 'Default 7d usage threshold (%)',
+        openaiQuotaAutoPauseThresholdHint: 'Value 0-100; leave blank or 0 to disable the global default threshold.',
         errorFiltering: 'Error Filtering',
         ignoreCountTokensErrors: 'Ignore count_tokens errors',
         ignoreCountTokensErrorsHint: 'When enabled, errors from count_tokens requests will not be written to the error log.',
@@ -5122,7 +5323,8 @@ export default {
           slaMinPercentRange: 'SLA minimum percentage must be between 0 and 100',
           ttftP99MaxRange: 'TTFT P99 maximum must be a number ≥ 0',
           requestErrorRateMaxRange: 'Request error rate maximum must be between 0 and 100',
-          upstreamErrorRateMaxRange: 'Upstream error rate maximum must be between 0 and 100'
+          upstreamErrorRateMaxRange: 'Upstream error rate maximum must be between 0 and 100',
+          openaiQuotaAutoPauseRange: 'OpenAI quota auto-pause threshold must be between 0 and 100'
         }
       },
       concurrency: {
@@ -5467,7 +5669,17 @@ export default {
         defaultSubscriptionsDuplicate:
           'Duplicate subscription group: {groupId}. Each group can only appear once.',
         subscriptionGroup: 'Subscription Group',
-        subscriptionValidityDays: 'Validity (days)'
+        subscriptionValidityDays: 'Validity (days)',
+        defaultPlatformQuotas: 'Default Platform Quotas (on signup)',
+        defaultPlatformQuotasHint: 'Automatically assigned to new users on signup; existing users are not affected. Leave blank = unlimited.',
+        platformQuotaNotice: 'Monthly quota uses a 30-day rolling window, not a calendar month.',
+      },
+      platformQuota: {
+        platform:    'Platform',
+        daily:       'Daily (USD)',
+        weekly:      'Weekly (USD)',
+        monthly:     'Monthly (USD, 30d rolling)',
+        placeholder: 'Unlimited',
       },
       claudeCode: {
         title: 'Claude Code Settings',
@@ -5506,6 +5718,9 @@ export default {
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.125.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.125.0)',
         openaiCodexUserAgentHint: 'Used to bypass Cloudflare browser-UA challenges on the OpenAI upstream. Only applies when the client User-Agent is detected as a browser (Mozilla/...). Leave empty to use the built-in default.',
+        openaiAllowClaudeCodeCodexPlugin: "Allow using the Codex plugin in Claude Code",
+        openaiAllowClaudeCodeCodexPluginDesc:
+          "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests remain pass-through.",
       },
       webSearchEmulation: {
         title: 'Web Search Emulation',
@@ -6188,7 +6403,9 @@ export default {
         grantOnFirstBindHint: 'Grant default entitlements when an existing user first binds this source.',
         defaultSubscriptionsLabel: 'Default subscriptions',
         defaultSubscriptionsHint: 'Applies only to this auth source. Leave empty to skip source-specific subscriptions.',
-        noSourceSubscriptions: 'No source-specific default subscriptions configured.'
+        noSourceSubscriptions: 'No source-specific default subscriptions configured.',
+        platformQuotasOverride: 'Platform Quota Overrides',
+        platformQuotasOverrideHint: 'Blank fields inherit the system default. Set to 0 to fully block that window for this auth source.',
       },
       paymentVisibleMethods: {
         methodLabel: '{title} visible method',

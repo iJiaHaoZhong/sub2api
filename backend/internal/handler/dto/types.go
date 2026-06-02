@@ -20,6 +20,7 @@ type User struct {
 	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -119,6 +120,10 @@ type Group struct {
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
 
+	// Kiro 模拟缓存配置（仅 Kiro 平台生效）
+	KiroCacheEmulationEnabled bool    `json:"kiro_cache_emulation_enabled"`
+	KiroCacheEmulationRatio   float64 `json:"kiro_cache_emulation_ratio"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -138,6 +143,7 @@ type AdminGroup struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	DefaultMappedModel          string                                   `json:"default_mapped_model"`
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
+	ModelsListConfig            domain.GroupModelsListConfig             `json:"models_list_config"`
 
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes    []string       `json:"supported_model_scopes"`
@@ -182,6 +188,12 @@ type Account struct {
 
 	TempUnschedulableUntil  *time.Time `json:"temp_unschedulable_until"`
 	TempUnschedulableReason string     `json:"temp_unschedulable_reason"`
+	KiroQuotaState          string     `json:"kiro_quota_state,omitempty"`
+	KiroQuotaReason         string     `json:"kiro_quota_reason,omitempty"`
+	KiroQuotaResetAt        *time.Time `json:"kiro_quota_reset_at,omitempty"`
+	KiroRuntimeState        string     `json:"kiro_runtime_state,omitempty"`
+	KiroRuntimeReason       string     `json:"kiro_runtime_reason,omitempty"`
+	KiroRuntimeResetAt      *time.Time `json:"kiro_runtime_reset_at,omitempty"`
 
 	SessionWindowStart  *time.Time `json:"session_window_start"`
 	SessionWindowEnd    *time.Time `json:"session_window_end"`

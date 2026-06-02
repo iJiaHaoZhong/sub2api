@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,12 +18,20 @@ import (
 
 // SystemHandler handles system-related operations
 type SystemHandler struct {
-	updateSvc *service.UpdateService
+	updateSvc systemUpdateService
 	lockSvc   *service.SystemOperationLockService
 }
 
+type systemUpdateService interface {
+	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
+	PerformUpdate(ctx context.Context) error
+	IsSourceBuild() bool
+	PerformSourceUpdate(ctx context.Context) error
+	Rollback() error
+}
+
 // NewSystemHandler creates a new SystemHandler
-func NewSystemHandler(updateSvc *service.UpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
+func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
 	return &SystemHandler{
 		updateSvc: updateSvc,
 		lockSvc:   lockSvc,
@@ -53,19 +62,51 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 // PerformUpdate downloads and applies the update
 // POST /api/v1/admin/system/update
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
-	var err error
-	if h.updateSvc.IsSourceBuild() {
-		err = h.updateSvc.PerformSourceUpdate(c.Request.Context())
-	} else {
-		err = h.updateSvc.PerformUpdate(c.Request.Context())
-	}
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	response.Success(c, gin.H{
-		"message":      "Update completed. Please restart the service.",
-		"need_restart": true,
+	operationID := buildSystemOperationID(c, "update")
+	payload := gin.H{"operation_id": operationID}
+	executeAdminIdempotentJSON(c, "admin.system.update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		lock, release, err := h.acquireSystemLock(ctx, operationID)
+		if err != nil {
+			return nil, err
+		}
+		var releaseReason string
+		succeeded := false
+		defer func() {
+			release(releaseReason, succeeded)
+		}()
+
+		var updErr error
+		if h.updateSvc.IsSourceBuild() {
+			updErr = h.updateSvc.PerformSourceUpdate(ctx)
+		} else {
+			updErr = h.updateSvc.PerformUpdate(ctx)
+		}
+		if err := updErr; err != nil {
+			if errors.Is(err, service.ErrNoUpdateAvailable) {
+				info, checkErr := h.updateSvc.CheckUpdate(ctx, false)
+				if checkErr != nil {
+					releaseReason = "SYSTEM_UPDATE_FAILED"
+					return nil, checkErr
+				}
+				succeeded = true
+				return gin.H{
+					"message":            "Already up to date",
+					"already_up_to_date": true,
+					"current_version":    info.CurrentVersion,
+					"latest_version":     info.LatestVersion,
+					"operation_id":       lock.OperationID(),
+				}, nil
+			}
+			releaseReason = "SYSTEM_UPDATE_FAILED"
+			return nil, err
+		}
+		succeeded = true
+
+		return gin.H{
+			"message":      "Update completed. Please restart the service.",
+			"need_restart": true,
+			"operation_id": lock.OperationID(),
+		}, nil
 	})
 }
 

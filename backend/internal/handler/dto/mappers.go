@@ -30,6 +30,7 @@ func UserFromServiceShallow(u *service.User) *User {
 		BalanceNotifyExtraEmails:   NotifyEmailEntriesFromService(u.BalanceNotifyExtraEmails),
 		TotalRecharged:             u.TotalRecharged,
 		RPMLimit:                   u.RPMLimit,
+		DeletedAt:                  u.DeletedAt,
 	}
 }
 
@@ -147,6 +148,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		MCPXMLInject:                g.MCPXMLInject,
 		DefaultMappedModel:          g.DefaultMappedModel,
 		MessagesDispatchModelConfig: g.MessagesDispatchModelConfig,
+		ModelsListConfig:            g.ModelsListConfig,
 		SupportedModelScopes:        g.SupportedModelScopes,
 		AccountCount:                g.AccountCount,
 		ActiveAccountCount:          g.ActiveAccountCount,
@@ -189,6 +191,8 @@ func groupFromServiceBase(g *service.Group) Group {
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
 		RPMLimit:                        g.RPMLimit,
+		KiroCacheEmulationEnabled:       g.EffectiveKiroCacheEmulationEnabled(),
+		KiroCacheEmulationRatio:         g.EffectiveKiroCacheEmulationRatio(),
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}
@@ -226,6 +230,12 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		OverloadUntil:           a.OverloadUntil,
 		TempUnschedulableUntil:  a.TempUnschedulableUntil,
 		TempUnschedulableReason: a.TempUnschedulableReason,
+		KiroQuotaState:          a.KiroQuotaState,
+		KiroQuotaReason:         a.KiroQuotaReason,
+		KiroQuotaResetAt:        a.KiroQuotaResetAt,
+		KiroRuntimeState:        a.KiroRuntimeState,
+		KiroRuntimeReason:       a.KiroRuntimeReason,
+		KiroRuntimeResetAt:      a.KiroRuntimeResetAt,
 		SessionWindowStart:      a.SessionWindowStart,
 		SessionWindowEnd:        a.SessionWindowEnd,
 		SessionWindowStatus:     a.SessionWindowStatus,

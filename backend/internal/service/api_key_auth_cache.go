@@ -87,9 +87,14 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
+	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
+
+	// Kiro 模拟缓存配置（仅 Kiro 分组生效）
+	KiroCacheEmulationEnabled bool    `json:"kiro_cache_emulation_enabled"`
+	KiroCacheEmulationRatio   float64 `json:"kiro_cache_emulation_ratio"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

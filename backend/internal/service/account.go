@@ -4,6 +4,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"reflect"
@@ -48,6 +49,13 @@ type Account struct {
 	TempUnschedulableUntil  *time.Time
 	TempUnschedulableReason string
 
+	KiroQuotaState     string
+	KiroQuotaReason    string
+	KiroQuotaResetAt   *time.Time
+	KiroRuntimeState   string
+	KiroRuntimeReason  string
+	KiroRuntimeResetAt *time.Time
+
 	SessionWindowStart  *time.Time
 	SessionWindowEnd    *time.Time
 	SessionWindowStatus string
@@ -65,6 +73,15 @@ type Account struct {
 	modelMappingCacheRawLen         int
 	modelMappingCacheRawSig         uint64
 }
+
+type OpenAIEndpointCapability string
+
+const (
+	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
+	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+)
+
+const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 
 type TempUnschedulableRule struct {
 	ErrorCode       int      `json:"error_code"`
@@ -162,6 +179,10 @@ func (a *Account) IsPrivacySet() bool {
 
 func (a *Account) IsGemini() bool {
 	return a.Platform == PlatformGemini
+}
+
+func (a *Account) IsKiro() bool {
+	return a.Platform == PlatformKiro
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -478,17 +499,17 @@ func (a *Account) GetModelMapping() map[string]string {
 
 func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]string {
 	if a.Credentials == nil {
-		// Antigravity 平台使用默认映射
-		if a.Platform == domain.PlatformAntigravity {
-			return domain.DefaultAntigravityModelMapping
+		// 部分平台在未显式配置 model_mapping 时仍应使用默认映射，
+		// 以限制可调度/可转发的模型集合。
+		if defaults := defaultModelMappingForPlatform(a.Platform); defaults != nil {
+			return defaults
 		}
 		// Bedrock 默认映射由 forwardBedrock 统一处理（需配合 region prefix 调整）
 		return nil
 	}
 	if len(rawMapping) == 0 {
-		// Antigravity 平台使用默认映射
-		if a.Platform == domain.PlatformAntigravity {
-			return domain.DefaultAntigravityModelMapping
+		if defaults := defaultModelMappingForPlatform(a.Platform); defaults != nil {
+			return defaults
 		}
 		return nil
 	}
@@ -510,11 +531,21 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		return result
 	}
 
-	// Antigravity 平台使用默认映射
-	if a.Platform == domain.PlatformAntigravity {
-		return domain.DefaultAntigravityModelMapping
+	if defaults := defaultModelMappingForPlatform(a.Platform); defaults != nil {
+		return defaults
 	}
 	return nil
+}
+
+func defaultModelMappingForPlatform(platform string) map[string]string {
+	switch platform {
+	case domain.PlatformAntigravity:
+		return domain.DefaultAntigravityModelMapping
+	case domain.PlatformKiro:
+		return domain.DefaultKiroModelMapping
+	default:
+		return nil
+	}
 }
 
 func mapPtr(m map[string]any) uintptr {
@@ -608,8 +639,8 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 	return matchWildcardMappingResult(mapping, requestedModel)
 }
 
-// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
+// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）。
+// 对带默认映射的平台（如 Antigravity/Kiro），未显式配置时也会先回退到默认映射。
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
@@ -622,8 +653,8 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
 }
 
-// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
-// 如果未配置 mapping，返回原始模型名
+// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）。
+// 对带默认映射的平台（如 Antigravity/Kiro），未显式配置时返回默认映射结果。
 func (a *Account) GetMappedModel(requestedModel string) string {
 	mappedModel, _ := a.ResolveMappedModel(requestedModel)
 	return mappedModel
@@ -725,6 +756,9 @@ func (a *Account) GetBaseURL() string {
 	}
 	baseURL := a.GetCredential("base_url")
 	if baseURL == "" {
+		if a.Platform == PlatformKiro {
+			return ""
+		}
 		return "https://api.anthropic.com"
 	}
 	if a.Platform == PlatformAntigravity {
@@ -890,14 +924,90 @@ func parsePoolModeRetryCount(value any) int {
 	return defaultPoolModeRetryCount
 }
 
-// isPoolModeRetryableStatus 池模式下应触发同账号重试的状态码
+// defaultPoolModeRetryableStatusCodes 池模式下默认触发同账号重试的状态码。
+// 未在 Account.Credentials 中显式配置 pool_mode_retry_status_codes 时使用。
+var defaultPoolModeRetryableStatusCodes = []int{401, 403, 429}
+
+// isPoolModeRetryableStatus 池模式下应触发同账号重试的状态码（默认列表）。
 func isPoolModeRetryableStatus(statusCode int) bool {
-	switch statusCode {
-	case 401, 403, 429:
-		return true
-	default:
-		return false
+	for _, c := range defaultPoolModeRetryableStatusCodes {
+		if c == statusCode {
+			return true
+		}
 	}
+	return false
+}
+
+// GetPoolModeRetryStatusCodes 返回账号自定义的池模式同账号重试状态码列表。
+//
+// 返回值语义：
+//   - nil：未配置 → 调用方应回退到默认值 [401, 403, 429]
+//   - 长度为 0 的切片：管理员显式置空 → 关闭按状态码触发的同账号重试
+//   - 非空切片：去重、过滤为合法 HTTP 状态码（100-599）后的覆盖列表
+func (a *Account) GetPoolModeRetryStatusCodes() []int {
+	if a == nil || a.Credentials == nil {
+		return nil
+	}
+	raw, ok := a.Credentials["pool_mode_retry_status_codes"]
+	if !ok || raw == nil {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(arr))
+	codes := make([]int, 0, len(arr))
+	for _, v := range arr {
+		var code int
+		switch n := v.(type) {
+		case float64:
+			code = int(n)
+		case int:
+			code = n
+		case int64:
+			code = int(n)
+		case json.Number:
+			i, err := n.Int64()
+			if err != nil {
+				continue
+			}
+			code = int(i)
+		case string:
+			i, err := strconv.Atoi(strings.TrimSpace(n))
+			if err != nil {
+				continue
+			}
+			code = i
+		default:
+			continue
+		}
+		if code < 100 || code > 599 {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	sort.Ints(codes)
+	return codes
+}
+
+// IsPoolModeRetryableStatus 在账号上下文中判断给定状态码是否应触发同账号重试。
+// 若账号未配置 pool_mode_retry_status_codes，则回退到默认列表。
+func (a *Account) IsPoolModeRetryableStatus(statusCode int) bool {
+	codes := a.GetPoolModeRetryStatusCodes()
+	if codes == nil {
+		return isPoolModeRetryableStatus(statusCode)
+	}
+	for _, c := range codes {
+		if c == statusCode {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Account) GetCustomErrorCodes() []int {
@@ -1044,6 +1154,80 @@ func (a *Account) GetOpenAISessionID() string {
 		return ""
 	}
 	return strings.TrimSpace(a.GetExtraString("openai_session_id"))
+}
+
+func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
+	if a == nil {
+		return false
+	}
+	if capability == "" {
+		return true
+	}
+	if !a.IsOpenAI() {
+		return false
+	}
+	switch capability {
+	case OpenAIEndpointCapabilityChatCompletions:
+	case OpenAIEndpointCapabilityEmbeddings:
+		if a.Type != AccountTypeAPIKey {
+			return false
+		}
+	default:
+		return false
+	}
+
+	configured, found := a.openAIEndpointCapabilitySet()
+	if !found {
+		return true
+	}
+	return configured[string(capability)]
+}
+
+func (a *Account) openAIEndpointCapabilitySet() (map[string]bool, bool) {
+	if a == nil || a.Credentials == nil {
+		return nil, false
+	}
+	raw, found := a.Credentials[openAIEndpointCapabilitiesCredentialKey]
+	if !found || raw == nil {
+		return nil, false
+	}
+
+	result := make(map[string]bool)
+	add := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			return
+		}
+		result[value] = true
+	}
+
+	switch capabilities := raw.(type) {
+	case []any:
+		for _, item := range capabilities {
+			if value, ok := item.(string); ok {
+				add(value)
+			}
+		}
+	case []string:
+		for _, value := range capabilities {
+			add(value)
+		}
+	case map[string]any:
+		for key, value := range capabilities {
+			enabled, ok := value.(bool)
+			if ok && enabled {
+				add(key)
+			}
+		}
+	case map[string]bool:
+		for key, enabled := range capabilities {
+			if enabled {
+				add(key)
+			}
+		}
+	}
+
+	return result, true
 }
 
 func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapability) bool {
@@ -1320,6 +1504,82 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	return ok && enabled
 }
 
+// accountCustomHeaderForbidden 账号自定义 header 中禁止覆盖的认证相关头。
+// hop-by-hop 类由 IsForbiddenHeaderName 兜底，此处仅补充认证头。
+var accountCustomHeaderForbidden = map[string]bool{
+	"authorization":  true,
+	"x-api-key":      true,
+	"x-goog-api-key": true,
+	"cookie":         true,
+}
+
+// GetCustomHeaders 返回账号级别的自定义请求头。
+// 字段：accounts.extra.custom_headers（map[string]string）。
+// 未配置或类型不匹配时返回 nil。
+func (a *Account) GetCustomHeaders() map[string]string {
+	if a == nil || a.Extra == nil {
+		return nil
+	}
+	raw, ok := a.Extra["custom_headers"]
+	if !ok || raw == nil {
+		return nil
+	}
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(rawMap))
+	for k, v := range rawMap {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ValidateAccountCustomHeaders 校验账号自定义 header 名称格式及黑名单。
+// 保存时调用，拒绝非法 header 名。
+func ValidateAccountCustomHeaders(h map[string]string) error {
+	for k := range h {
+		if !headerNameRegex.MatchString(k) {
+			return fmt.Errorf("custom header name invalid: %s", k)
+		}
+		lower := strings.ToLower(strings.TrimSpace(k))
+		if IsForbiddenHeaderName(k) || accountCustomHeaderForbidden[lower] {
+			return fmt.Errorf("custom header name forbidden: %s", k)
+		}
+	}
+	return nil
+}
+
+// validateAccountCustomHeadersFromExtra 从 extra map 中提取 custom_headers 并校验。
+func validateAccountCustomHeadersFromExtra(extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	raw, ok := extra["custom_headers"]
+	if !ok || raw == nil {
+		return nil
+	}
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	parsed := make(map[string]string, len(rawMap))
+	for k, v := range rawMap {
+		if s, ok := v.(string); ok {
+			parsed[k] = s
+		}
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	return ValidateAccountCustomHeaders(parsed)
+}
+
 // WebSearch 模拟三态常量
 const (
 	WebSearchModeDefault  = "default"  // 跟随渠道配置
@@ -1364,6 +1624,38 @@ func (a *Account) IsCodexCLIOnlyEnabled() bool {
 	}
 	enabled, ok := a.Extra["codex_cli_only"].(bool)
 	return ok && enabled
+}
+
+// GetCodexCLIOnlyAllowedClients 返回 codex_cli_only 之上额外放行的命名客户端预设 ID 列表。
+// 仅 OpenAI OAuth 账号生效；缺失或类型不符时返回空。预设 ID 的具体匹配规则由
+// openai 包的 registry 固化，配置只能引用预设键、不能自定义规则。
+func (a *Account) GetCodexCLIOnlyAllowedClients() []string {
+	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil {
+		return nil
+	}
+	raw, ok := a.Extra["codex_cli_only_allowed_clients"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		result := make([]string, 0, len(v))
+		for _, s := range v {
+			if strings.TrimSpace(s) != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 // WindowCostSchedulability 窗口费用调度状态
